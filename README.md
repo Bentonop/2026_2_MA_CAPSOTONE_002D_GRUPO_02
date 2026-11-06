@@ -38,16 +38,19 @@ Para que cualquier miembro del equipo pueda levantar el proyecto en su máquina,
 Clona el repositorio e ingresa a la carpeta del proyecto para instalar las dependencias:
 ```bash
 git clone https://github.com/Bentonop/2026_2_MA_CAPSOTONE_002D_GRUPO_02.git
-cd "2026_2_MA_CAPSOTONE_002D_GRUPO_02/Fase 2/Evidencias Proyecto/Proyecto"
+cd "2026_2_MA_CAPSOTONE_002D_GRUPO_02/Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicacion/Proyecto"
 npm install
 ```
 
 ### 3. Base de Datos (Scripts SQL)
-En la carpeta `Fase 2/Evidencias Proyecto/Proyecto/database_scripts/` encontrarás los archivos `.sql` (`planes.sql`, `pagos.sql`, `salas.sql`, `ficha_medica.sql`, `full_database_setup.sql`, `rls_politicas_seguridad.sql`). Estos archivos son el esqueleto de la base de datos.
-Si estás montando una base de datos desde cero, **debes ejecutar el contenido de estos archivos** en el *SQL Editor* de Supabase.
+En las siguientes carpetas encontrarás los archivos `.sql` correspondientes:
+- `Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicacion/Base de datos/` (`full_database_setup.sql`, `rls_politicas_seguridad.sql`)
+- `Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicacion/Proyecto/database_scripts/` (`planes.sql`, `pagos.sql`, `salas.sql`, `ficha_medica.sql`, `demo_seed.sql`, etc.)
+
+Estos archivos son el esqueleto de la base de datos. Si estás montando una base de datos desde cero, **debes ejecutar el contenido de estos archivos** en el *SQL Editor* de Supabase.
 
 ### 4. Variables de Entorno
-Crea un archivo llamado `.env.local` dentro de la carpeta del proyecto (`Fase 2/Evidencias Proyecto/Proyecto/`) y añade las claves de Supabase:
+Crea un archivo llamado `.env.local` dentro de la carpeta del proyecto (`Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicacion/Proyecto/`) y añade las claves de Supabase:
 ```env
 NEXT_PUBLIC_SUPABASE_URL=tu_url_de_supabase
 NEXT_PUBLIC_SUPABASE_ANON_KEY=tu_clave_anon_de_supabase
@@ -62,4 +65,4 @@ La aplicación estará disponible en `http://localhost:3000`.
 ## 🤝 Flujo de Trabajo del Equipo (Obligatorio)
 
 Para mantener la estabilidad del código, todo el equipo debe seguir la metodología **GitHub Flow**.
-Por favor, lee el archivo [**CONTRIBUTING.md**](./Fase%202/Evidencias%20Proyecto/Proyecto/CONTRIBUTING.md) antes de empezar a programar. Allí se detalla cómo crear ramas, cómo nombrar los commits y cómo hacer Pull Requests. **NUNCA subas cambios directamente a `main`.**
+Por favor, lee el archivo [**CONTRIBUTING.md**](./Fase%202/Evidencias%20Proyecto/Evidencias%20de%20sistema%20Aplicacion/Proyecto/CONTRIBUTING.md) antes de empezar a programar. Allí se detalla cómo crear ramas, cómo nombrar los commits y cómo hacer Pull Requests. **NUNCA subas cambios directamente a `main`.**

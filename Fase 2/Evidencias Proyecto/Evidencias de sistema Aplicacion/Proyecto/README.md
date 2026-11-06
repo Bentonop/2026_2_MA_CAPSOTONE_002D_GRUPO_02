@@ -35,19 +35,19 @@ Para que cualquier miembro del equipo pueda levantar el proyecto en su máquina,
 - Solicitar al administrador las credenciales del entorno de **Supabase**.
 
 ### 2. Instalación
-Clona el repositorio e instala las dependencias:
+Clona el repositorio e ingresa a la carpeta del proyecto para instalar las dependencias:
 ```bash
-git clone https://github.com/Bentonop/Capstone_Project.git
-cd app-cuerpo-y-alma
+git clone https://github.com/Bentonop/2026_2_MA_CAPSOTONE_002D_GRUPO_02.git
+cd "2026_2_MA_CAPSOTONE_002D_GRUPO_02/Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicacion/Proyecto"
 npm install
 ```
 
 ### 3. Base de Datos (Scripts SQL)
-En la raíz del proyecto encontrarás varios archivos `.sql` (`planes.sql`, `pagos.sql`, `salas.sql`, `ficha_medica.sql`). Estos archivos son el esqueleto de la base de datos.
+En la carpeta `database_scripts/` encontrarás los archivos `.sql` (`planes.sql`, `pagos.sql`, `salas.sql`, `ficha_medica.sql`, `full_database_setup.sql`, `rls_politicas_seguridad.sql`). Estos archivos son el esqueleto de la base de datos.
 Si estás montando una base de datos desde cero, **debes ejecutar el contenido de estos archivos** en el *SQL Editor* de Supabase.
 
 ### 4. Variables de Entorno
-Crea un archivo llamado `.env.local` en la raíz del proyecto y añade las claves de Supabase:
+Crea un archivo llamado `.env.local` en la raíz de esta carpeta (`Proyecto/`) y añade las claves de Supabase:
 ```env
 NEXT_PUBLIC_SUPABASE_URL=tu_url_de_supabase
 NEXT_PUBLIC_SUPABASE_ANON_KEY=tu_clave_anon_de_supabase
