@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import QrScanner from "@/components/shared/QrScanner";
 import RoleGuard from "@/components/ui/auth/RoleGuard";
-import { QRCodeSVG } from "qrcode.react";
 import BrandLogo from "@/components/ui/BrandLogo";
+import toast from "react-hot-toast";
 
 type StudentStatus = "presente" | "pendiente" | "cancelado";
 
@@ -27,11 +27,19 @@ interface Student {
 export default function ProfesorClasePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const [qrMode, setQrMode] = useState<"scan" | "display">("scan");
+
+  // Estados de datos
   const [students, setStudents] = useState<Student[]>([]);
   const [claseDetalle, setClaseDetalle] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Estados para el Escáner de Asistencia (Exclusivo Docente)
+  const [isScannerModalOpen, setIsScannerModalOpen] = useState(false);
+  const [isScannerLocked, setIsScannerLocked] = useState(false);
+  const [isProcessingScan, setIsProcessingScan] = useState(false);
+  const [scanFeedback, setScanFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  // Modales y Alertas
   const [isIncidentModalOpen, setIsIncidentModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
@@ -122,7 +130,7 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
       .upsert({
         id_reserva: reservaId,
         fecha_hora_ingreso: new Date().toISOString(),
-        metodo_ingreso: "QR",
+        metodo_ingreso: "QR_DOCENTE",
         token_qr_usado: tokenUsado
       }, { onConflict: 'id_reserva' });
 
@@ -138,53 +146,121 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
     if (pendingStudent) {
       await registrarAsistenciaBD(pendingStudent.reserva_id, `simulacion-${pendingStudent.reserva_id}`);
       
-      const updatedStudent = { ...pendingStudent, status: "presente" as StudentStatus, time: "Ahora" };
+      const horaActual = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+      const updatedStudent = { ...pendingStudent, status: "presente" as StudentStatus, time: horaActual };
       setStudents(prev => prev.map(s => s.id === pendingStudent.id ? updatedStudent : s));
       setSelectedStudent(updatedStudent);
-      showToast(`Ingresó: ${pendingStudent.name}. Revisa sus datos.`);
+      toast.success(`✅ ¡Presente! Asistencia confirmada para ${pendingStudent.name}`);
+      showToast(`Ingresó: ${pendingStudent.name}`);
     } else {
-      showToast("No hay alumnos pendientes para escanear");
+      toast("No hay alumnos pendientes para escanear");
     }
   };
 
+  // MANEJO PRINCIPAL DE ESCANEO DE QR (ANTI-SATURACIÓN Y CIERRE AUTOMÁTICO)
   const handleScanResult = async (decodedText: string) => {
+    // 1. Evitar lecturas múltiples simultáneas que saturen la app
+    if (isScannerLocked || isProcessingScan) return;
+    setIsScannerLocked(true);
+    setIsProcessingScan(true);
+
     let targetReservaId: number | null = null;
     let targetClaseId: number | null = null;
+    let targetUserId: string | null = null;
 
     try {
       const parsed = JSON.parse(decodedText);
-      targetReservaId = Number(parsed.id_reserva);
-      targetClaseId = Number(parsed.id_clase);
+      targetReservaId = Number(parsed.id_reserva) || null;
+      targetClaseId = Number(parsed.id_clase) || null;
+      targetUserId = parsed.id_usuario || null;
     } catch {
       targetReservaId = Number(decodedText) || null;
     }
 
+    // 2. Validación de Clase: el QR debe pertenecer a esta clase
     if (targetClaseId && String(targetClaseId) !== String(id)) {
-      showToast("Este código QR pertenece a otra clase.");
+      const errorMsg = `Este código QR pertenece a otra clase (#${targetClaseId}). No corresponde a ${claseDetalle?.nombre_clase || "esta sesión"}.`;
+      toast.error(errorMsg);
+      setScanFeedback({ type: "error", message: errorMsg });
+      setIsProcessingScan(false);
       return;
     }
 
+    // 3. Buscar el alumno en la lista de inscritos
     const student = students.find(s => 
       (targetReservaId && s.reserva_id === targetReservaId) || 
+      (targetUserId && s.id === targetUserId) ||
       s.id.toString() === decodedText || 
       s.reserva_id.toString() === decodedText || 
       s.name.toLowerCase() === decodedText.toLowerCase()
     );
-    
-    if (student) {
-      if (student.status === "pendiente") {
-        await registrarAsistenciaBD(student.reserva_id, decodedText);
 
-        const updatedStudent = { ...student, status: "presente" as StudentStatus, time: "Ahora" };
-        setStudents(prev => prev.map(s => s.id === student.id ? updatedStudent : s));
-        setSelectedStudent(updatedStudent);
-        showToast(`QR Exitoso: ${student.name}`);
-      } else if (student.status === "presente") {
-        showToast(`${student.name} ya está presente.`);
+    if (!student) {
+      const errorMsg = "Código QR no válido o el alumno no se encuentra inscrito en esta clase.";
+      toast.error(errorMsg);
+      setScanFeedback({ type: "error", message: errorMsg });
+      setIsProcessingScan(false);
+      return;
+    }
+
+    // 4. Si el alumno ya está presente
+    if (student.status === "presente") {
+      const infoMsg = `${student.name} ya tenía su asistencia confirmada previamente.`;
+      toast(infoMsg);
+      setScanFeedback({ type: "success", message: `${student.name} ya está presente` });
+      setIsProcessingScan(false);
+      
+      // Cerrar escáner tras breve confirmación
+      setTimeout(() => {
+        setIsScannerModalOpen(false);
+        setScanFeedback(null);
+        setIsScannerLocked(false);
+      }, 1000);
+      return;
+    }
+
+    // 5. Si la reserva fue cancelada
+    if (student.status === "cancelado") {
+      const errorMsg = `La reserva de ${student.name} figura como cancelada. No es posible dar acceso.`;
+      toast.error(errorMsg);
+      setScanFeedback({ type: "error", message: errorMsg });
+      setIsProcessingScan(false);
+      return;
+    }
+
+    // 6. CASO DE ÉXITO: Registrar en base de datos y cerrar escáner automáticamente
+    try {
+      await registrarAsistenciaBD(student.reserva_id, decodedText);
+
+      const horaActual = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+      const updatedStudent = { ...student, status: "presente" as StudentStatus, time: horaActual };
+      
+      setStudents(prev => prev.map(s => s.id === student.id ? updatedStudent : s));
+      setSelectedStudent(updatedStudent);
+
+      // Feedback háptico en móviles
+      if (typeof window !== "undefined" && window.navigator && window.navigator.vibrate) {
+        window.navigator.vibrate([100, 50, 100]);
       }
-    } else {
-      console.log("QR no reconocido o alumno no encontrado:", decodedText);
-      showToast("QR no válido o alumno no inscrito.");
+
+      toast.success(`✅ ¡Presente! Asistencia confirmada para ${student.name}`);
+      setScanFeedback({
+        type: "success",
+        message: `¡Asistencia confirmada para ${student.name}!`
+      });
+
+      // Cerrar el escáner automáticamente tal como pidió el usuario
+      setTimeout(() => {
+        setIsScannerModalOpen(false);
+        setScanFeedback(null);
+        setIsScannerLocked(false);
+        setIsProcessingScan(false);
+      }, 900);
+    } catch (err) {
+      console.error("Error al registrar asistencia:", err);
+      toast.error("Error al conectar con la base de datos.");
+      setScanFeedback({ type: "error", message: "Error al guardar asistencia." });
+      setIsProcessingScan(false);
     }
   };
 
@@ -196,17 +272,20 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
 
     await registrarAsistenciaBD(student.reserva_id, `manual-${student.reserva_id}`);
 
-    const updatedStudent = { ...student, status: "presente" as StudentStatus, time: "Ahora" };
+    const horaActual = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+    const updatedStudent = { ...student, status: "presente" as StudentStatus, time: horaActual };
     setStudents(prev => 
       prev.map(s => s.id === studentId ? updatedStudent : s)
     );
     setSelectedStudent(updatedStudent);
-    showToast(`Ingresó: ${student.name}. Revisa sus datos.`);
+    toast.success(`✅ ¡Presente! ${student.name} marcado manualmente.`);
+    showToast(`Ingresó: ${student.name}`);
   };
 
   const submitIncident = (type: string) => {
     setIsIncidentModalOpen(false);
     showToast(`Aviso enviado: ${type}`);
+    toast.success(`Alerta enviada a dirección: ${type}`);
   };
 
   const handleStartClass = async () => {
@@ -235,10 +314,11 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
         
       if (notifError) console.warn("La tabla de notificaciones podría no estar lista aún:", notifError);
 
-      showToast("✅ Clase iniciada correctamente. Administrador notificado.");
+      toast.success("✅ Clase iniciada correctamente.");
+      showToast("✅ Clase iniciada correctamente.");
     } catch (err) {
       console.error("Error al iniciar clase:", err);
-      showToast("❌ Hubo un error al iniciar la clase");
+      toast.error("❌ Hubo un error al iniciar la clase");
     }
   };
 
@@ -259,7 +339,7 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
             <h1 className="font-headline-sm text-headline-sm text-on-surface tracking-tight truncate max-w-[200px] ml-2">Detalle De Clase</h1>
           </div>
           <div className="flex items-center gap-space-xs">
-             <div className="w-8 h-8 rounded-full bg-surface-container-high shadow-sm flex items-center justify-center text-primary font-bold text-xs">MS</div>
+             <div className="w-8 h-8 rounded-full bg-surface-container-high shadow-sm flex items-center justify-center text-primary font-bold text-xs">DOC</div>
           </div>
         </div>
       </header>
@@ -267,6 +347,7 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
       <main className="flex flex-col relative w-full pt-16 pb-safe bg-surface min-h-screen">
         <div className="flex flex-col w-full max-w-5xl mx-auto pb-10">
           
+          {/* Tarjeta Resumen de la Clase */}
           <section className="px-margin-mobile pt-space-xs pb-space-sm">
             <div className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-surface-container/50">
               <div className="flex items-start justify-between gap-space-xs">
@@ -283,23 +364,17 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
                         PROGRAMADA
                       </span>
                     )}
-                    <span className="text-secondary font-label-caps text-label-caps uppercase tracking-wider ml-2">{claseDetalle?.sala || "Sala Pole 1"}</span>
+                    <span className="text-secondary font-label-caps text-label-caps uppercase tracking-wider ml-2">{claseDetalle?.sala || "Sala Principal"}</span>
                   </div>
                   <h2 className="font-headline-md text-headline-md text-on-surface truncate">{claseDetalle?.nombre_clase || "Cargando..."}</h2>
                   <p className="font-body-sm text-body-sm text-secondary mt-0.5 flex items-center gap-1">
                     <span className="material-symbols-outlined text-[16px]">schedule</span>
                     {claseDetalle ? new Date(claseDetalle.fecha_hora_inicio).toLocaleString('es-CL', { weekday: 'short', hour: '2-digit', minute:'2-digit' }) : ""} hrs
                   </p>
-                  <div className="mt-3 text-secondary font-body-sm text-body-sm bg-surface-container/50 p-2.5 rounded-lg border border-surface-container-high">
-                    <p className="font-bold flex items-center gap-1.5 text-on-surface">
-                      <span className="material-symbols-outlined text-[16px] text-primary">info</span>
-                      Recordatorio a alumnos:
-                    </p>
-                    <p className="mt-1">Traer botella de agua, toalla personal y alcohol (magnesio líquido opcional).</p>
-                  </div>
                 </div>
               </div>
               
+              {/* Barra de Asistencia */}
               <div className="mt-space-md pt-space-sm border-t border-surface-container">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-1.5">
@@ -335,72 +410,52 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
             </div>
           </section>
 
+          {/* SECCIÓN EXCLUSIVA DE ESCANEO DE ASISTENCIA QR PARA EL PROFESOR */}
           <section className="px-margin-mobile py-space-xs">
-            <div className="premium-card rounded-2xl p-space-md shadow-md flex flex-col">
-              <div className="flex items-center justify-between mb-space-sm">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
-                    <span className="material-symbols-outlined text-[20px]">qr_code_scanner</span>
+            <div className="premium-card rounded-2xl p-space-md shadow-md flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                    <span className="material-symbols-outlined text-[24px]">qr_code_scanner</span>
                   </div>
                   <div>
-                    <h3 className="font-headline-sm text-headline-sm text-on-surface">Validación de Ingreso</h3>
-                    <p className="font-body-sm text-body-sm text-secondary">Control automático de acceso</p>
+                    <h3 className="font-headline-sm text-base text-on-surface font-bold">Lector de Asistencia QR</h3>
+                    <p className="font-body-sm text-xs text-secondary">Solo el profesor escanea los pases de los alumnos</p>
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 p-1 bg-surface-container rounded-xl gap-1 mb-space-md border border-surface-container-high">
+              {/* Botón Principal para Abrir el Escáner */}
+              <div className="flex flex-col gap-2 mt-1">
                 <button 
-                  className={`py-2.5 px-2 rounded-lg font-label-md text-label-md flex items-center justify-center gap-1.5 transition-all ${qrMode === 'scan' ? 'bg-surface-container-lowest text-primary shadow-sm font-semibold' : 'text-secondary hover:text-on-surface font-normal'}`}
-                  onClick={() => setQrMode("scan")}
+                  onClick={() => {
+                    setScanFeedback(null);
+                    setIsScannerLocked(false);
+                    setIsScannerModalOpen(true);
+                  }}
+                  className="w-full py-4 px-4 rounded-xl bg-primary text-on-primary font-label-lg font-bold flex items-center justify-center gap-2.5 hover:opacity-90 active:scale-[0.98] transition-all shadow-md shadow-primary/20"
                 >
-                  <span className="material-symbols-outlined text-[18px]">photo_camera</span>
-                  Escanear
+                  <span className="material-symbols-outlined text-[22px]">photo_camera</span>
+                  Escanear Pase QR de Alumno
                 </button>
-                <button 
-                  className={`py-2.5 px-2 rounded-lg font-label-md text-label-md flex items-center justify-center gap-1.5 transition-all ${qrMode === 'display' ? 'bg-surface-container-lowest text-primary shadow-sm font-semibold' : 'text-secondary hover:text-on-surface font-normal'}`}
-                  onClick={() => setQrMode("display")}
-                >
-                  <span className="material-symbols-outlined text-[18px]">qr_code_2</span>
-                  Mostrar QR
-                </button>
-              </div>
 
-              {qrMode === "scan" ? (
-                <div className="flex flex-col items-center">
-                  <div className="w-full max-w-[280px]">
-                    <QrScanner onResult={handleScanResult} />
-                  </div>
-                  <div className="flex items-center justify-between w-full mt-space-sm pt-space-xs text-secondary font-body-sm text-body-sm">
-                    <span className="flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[16px] text-primary">bolt</span>
-                      Detección instantánea
-                    </span>
-                    <button className="text-primary font-label-md text-label-md underline hover:text-primary-fixed-variant" onClick={handleSimulateScan}>
-                      Simular Pase
-                    </button>
-                  </div>
+                <div className="flex items-center justify-between px-1 pt-1 text-xs text-secondary">
+                  <span className="flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[15px] text-emerald-500">lock_clock</span>
+                    Cierre automático al registrar
+                  </span>
+                  <button 
+                    onClick={handleSimulateScan}
+                    className="text-primary hover:underline font-semibold"
+                  >
+                    Simular Pase (Test)
+                  </button>
                 </div>
-              ) : (
-                <div className="flex flex-col items-center py-2">
-                  <div className="p-5 bg-surface-container rounded-2xl shadow-inner border border-surface-container-high flex flex-col items-center w-full">
-                    <div className="w-52 h-52 bg-white p-3 rounded-xl flex items-center justify-center shadow-md">
-                      <QRCodeSVG
-                        value={JSON.stringify({ id_clase: id, tipo: "asistencia_clase" })}
-                        size={180}
-                        level="M"
-                      />
-                    </div>
-                    <div className="text-center mt-4">
-                      <span className="font-headline-sm text-headline-sm text-on-surface">Clase en Curso</span>
-                      <p className="font-body-sm text-body-sm text-secondary mx-auto mt-1">Los alumnos pueden escanear este código desde su app para registrar asistencia.</p>
-                    </div>
-                  </div>
-                </div>
-              )}
+              </div>
             </div>
           </section>
 
+          {/* RÓSTER DE ALUMNOS */}
           <section className="px-margin-mobile pt-space-md flex flex-col gap-space-xs">
             <div className="flex items-center justify-between px-1">
               <div>
@@ -466,7 +521,7 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
                           onClick={(e) => handleCheckIn(student.id, e)}
                         >
                           <span className="material-symbols-outlined text-[16px]">touch_app</span>
-                          <span className="">Marcar</span>
+                          <span>Marcar</span>
                         </button>
                       )}
                     </div>
@@ -505,6 +560,7 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
             </div>
           </section>
 
+          {/* GESTIÓN DE INCIDENCIAS */}
           <section className="px-margin-mobile pt-space-lg pb-space-md">
             <div className="bg-surface-container-low border border-surface-container-high rounded-2xl p-space-md flex flex-col gap-space-xs">
               <div className="flex items-start gap-space-sm">
@@ -531,6 +587,117 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
         </div>
       </main>
 
+      {/* MODAL ESCÁNER DE ASISTENCIA QR PARA EL PROFESOR */}
+      {isScannerModalOpen && (
+        <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
+          <div className="w-full max-w-sm bg-surface-container-lowest rounded-3xl p-6 shadow-2xl border border-surface-container flex flex-col items-center relative overflow-hidden">
+            
+            {/* Header Modal */}
+            <div className="w-full flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                  <span className="material-symbols-outlined text-[22px]">photo_camera</span>
+                </div>
+                <div>
+                  <h3 className="font-headline-sm text-base text-on-surface font-bold">Lector de Asistencia</h3>
+                  <p className="font-body-sm text-xs text-secondary truncate max-w-[200px]">
+                    {claseDetalle?.nombre_clase || "Clase actual"}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setIsScannerModalOpen(false);
+                  setScanFeedback(null);
+                  setIsScannerLocked(false);
+                }}
+                aria-label="Cerrar escáner"
+                className="w-9 h-9 rounded-full bg-surface-container hover:bg-surface-container-high flex items-center justify-center text-on-surface-variant transition-colors"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+
+            {/* Contenido / Estado del Escaneo */}
+            {scanFeedback?.type === "success" ? (
+              <div className="w-full py-8 flex flex-col items-center justify-center text-center gap-3 animate-in zoom-in-95">
+                <div className="w-16 h-16 rounded-full bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-[38px]">check_circle</span>
+                </div>
+                <h4 className="font-headline-sm text-xl font-bold text-on-surface">¡Presente!</h4>
+                <p className="font-body-sm text-sm text-emerald-500 font-semibold">{scanFeedback.message}</p>
+                <span className="text-xs text-on-surface-variant mt-1">Cerrando escáner...</span>
+              </div>
+            ) : scanFeedback?.type === "error" ? (
+              <div className="w-full py-6 flex flex-col items-center justify-center text-center gap-3 animate-in zoom-in-95">
+                <div className="w-14 h-14 rounded-full bg-error/15 text-error border border-error/30 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-[32px]">warning</span>
+                </div>
+                <h4 className="font-headline-sm text-lg font-bold text-error">Atención: Código No Válido</h4>
+                <div className="p-3 rounded-xl bg-error/10 border border-error/20 text-xs text-on-surface text-center">
+                  {scanFeedback.message}
+                </div>
+                <div className="flex gap-2 w-full mt-2">
+                  <button
+                    onClick={() => {
+                      setScanFeedback(null);
+                      setIsScannerLocked(false);
+                    }}
+                    className="flex-1 py-3 bg-primary text-on-primary font-label-md font-bold rounded-xl active:scale-95 transition-all text-xs flex items-center justify-center gap-1.5"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">refresh</span>
+                    Escanear Siguiente
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsScannerModalOpen(false);
+                      setScanFeedback(null);
+                      setIsScannerLocked(false);
+                    }}
+                    className="py-3 px-4 bg-surface-container text-on-surface font-label-md font-medium rounded-xl active:scale-95 transition-all text-xs"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="w-full flex flex-col items-center">
+                <div className="w-full max-w-[280px]">
+                  <QrScanner 
+                    onResult={handleScanResult} 
+                    isLocked={isScannerLocked} 
+                    id="teacher-attendance-scanner" 
+                  />
+                </div>
+
+                <p className="font-body-sm text-xs text-secondary text-center mt-4">
+                  Apunta la cámara al teléfono del alumno (su Pase QR).
+                </p>
+
+                {isProcessingScan && (
+                  <div className="mt-3 flex items-center gap-2 text-primary font-label-md text-xs">
+                    <span className="material-symbols-outlined animate-spin text-[16px]">refresh</span>
+                    Validando reserva...
+                  </div>
+                )}
+
+                <button
+                  onClick={() => {
+                    setIsScannerModalOpen(false);
+                    setScanFeedback(null);
+                    setIsScannerLocked(false);
+                  }}
+                  className="w-full mt-4 py-3 rounded-xl bg-surface-container text-on-surface font-label-md font-medium hover:bg-surface-container-high transition-colors text-sm"
+                >
+                  Cancelar
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE INCIDENCIAS */}
       {isIncidentModalOpen && (
         <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-end justify-center">
           <div className="bg-surface-container-lowest border-t border-surface-container w-full max-w-lg rounded-t-3xl p-space-lg flex flex-col shadow-2xl animate-in slide-in-from-bottom">
@@ -568,6 +735,7 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
         </div>
       )}
 
+      {/* TOAST FLOTANTE */}
       <div className={`fixed top-20 inset-x-4 z-50 flex items-center justify-center pointer-events-none transition-all duration-300 ${toastMessage ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'}`}>
         <div className="bg-surface-container-highest border border-surface-container-high text-on-surface px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 max-w-sm">
           <span className="material-symbols-outlined text-primary text-[20px]">check_circle</span>

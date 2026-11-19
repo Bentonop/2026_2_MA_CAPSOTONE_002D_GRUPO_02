@@ -9,8 +9,8 @@ export function AdminBottomNavigation() {
   const navItems = [
     {
       href: "/admin/dashboard",
-      icon: "crisis_alert",
-      label: "Urgencias",
+      icon: "dashboard",
+      label: "Dashboard",
       match: "/admin/dashboard"
     },
     {

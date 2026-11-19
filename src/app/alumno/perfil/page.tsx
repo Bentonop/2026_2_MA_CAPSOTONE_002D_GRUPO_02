@@ -80,7 +80,7 @@ export default function AlumnoPerfilPage() {
 
   const handleDeleteAccount = async () => {
     if (window.confirm("¿Estás segura de que quieres eliminar tu cuenta permanentemente? Perderás todos tus planes y reservas.")) {
-      alert("Tu cuenta ha sido eliminada del sistema.");
+      toast.success("Tu cuenta ha sido eliminada del sistema.");
       await supabase.auth.signOut();
       window.location.href = "/";
     }

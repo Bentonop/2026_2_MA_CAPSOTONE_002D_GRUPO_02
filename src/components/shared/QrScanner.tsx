@@ -6,22 +6,39 @@ interface QrScannerProps {
   onResult: (decodedText: string) => void;
   onError?: (error: any) => void;
   id?: string;
+  isLocked?: boolean;
 }
 
-export default function QrScanner({ onResult, onError, id = "qr-reader" }: QrScannerProps) {
+export default function QrScanner({ onResult, onError, id = "qr-reader", isLocked = false }: QrScannerProps) {
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const scanLockRef = useRef<boolean>(false);
+
+  // Sincronizar el bloqueo externo con la referencia interna
+  useEffect(() => {
+    scanLockRef.current = isLocked;
+  }, [isLocked]);
 
   useEffect(() => {
-    // Only render once per element id
+    // Evitar inicialización duplicada
     if (!scannerRef.current) {
       scannerRef.current = new Html5QrcodeScanner(
         id,
-        { fps: 10, qrbox: { width: 250, height: 250 } },
+        { 
+          fps: 10, 
+          qrbox: { width: 250, height: 250 },
+          aspectRatio: 1.0,
+          showTorchButtonIfSupported: true,
+        },
         false
       );
 
       scannerRef.current.render(
         (decodedText) => {
+          // Bloqueo estricto anti-saturación: si ya se detectó un código, ignorar cuadros posteriores
+          if (scanLockRef.current) {
+            return;
+          }
+          scanLockRef.current = true;
           onResult(decodedText);
         },
         (errorMessage) => {
@@ -32,7 +49,14 @@ export default function QrScanner({ onResult, onError, id = "qr-reader" }: QrSca
 
     return () => {
       if (scannerRef.current) {
-        scannerRef.current.clear().catch(e => console.error("Error clearing scanner:", e));
+        try {
+          scannerRef.current.clear().catch(e => {
+            // Ignorar errores benignos de desmonte rápido
+            console.debug("Info clearing scanner:", e);
+          });
+        } catch (e) {
+          console.debug("Catch on scanner cleanup:", e);
+        }
         scannerRef.current = null;
       }
     };
@@ -48,6 +72,10 @@ export default function QrScanner({ onResult, onError, id = "qr-reader" }: QrSca
         }
         #${id}__scan_region {
           min-height: 200px;
+        }
+        #${id}__scan_region video {
+          object-fit: cover !important;
+          border-radius: 12px;
         }
         #${id}__dashboard {
           padding: 10px;

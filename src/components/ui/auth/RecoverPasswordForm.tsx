@@ -109,7 +109,7 @@ const RecoverPasswordForm = ({ setTypeSelected }: AuthFormProps) => {
                         </form>
 
                     {/* ========== Volver ========= */}
-                    <p className="text-center text-sm text-white mt-3">
+                    <p className="text-center text-sm text-foreground mt-3">
                         <span
                             onClick={() => setTypeSelected('sign-in')}
                             className="underline underline-offset-4 hover:text-primary cursor-pointer"

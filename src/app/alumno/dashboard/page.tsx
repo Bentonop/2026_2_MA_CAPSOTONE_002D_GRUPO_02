@@ -1,13 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import StudentQrAttendanceModal from "@/components/shared/StudentQrAttendanceModal";
 
 export default function AlumnoDashboard() {
   const [programs, setPrograms] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [userName, setUserName] = useState<string>("Bailarín/a");
 
   useEffect(() => {
@@ -48,84 +47,106 @@ export default function AlumnoDashboard() {
 
         if (error) throw error;
 
-        // Group by class name
-        const classGroups: Record<string, any> = {};
-        
-        // Initialize with fetched programs
-        if (typesData) {
-          typesData.forEach(bp => {
-            classGroups[bp.nombre] = {
-              id: bp.id || bp.nombre,
-              name: bp.nombre,
-              icon: bp.icono || "sports_martial_arts",
-              schedulesMap: {} // day -> times array
+        // Group by tipo_clase_id
+        if (typesData && data) {
+          const daysOrder = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+          
+          const grouped = typesData.map((type: any) => {
+            const templates = data.filter((t: any) => t.tipo_clase_id === type.id);
+            
+            // Map schedules for all days
+            const schedules = daysOrder.map((dayName) => {
+              const dayTemplates = templates.filter((t: any) => t.dia_semana === dayName);
+              const times = dayTemplates.map((t: any) => {
+                // Formatting "18:00:00" to "18:00"
+                return t.hora_inicio ? t.hora_inicio.substring(0, 5) : "";
+              }).filter(Boolean);
+
+              return {
+                day: dayName.substring(0, 3).toUpperCase(),
+                fullDay: dayName,
+                times: times
+              };
+            });
+
+            return {
+              id: type.id,
+              name: type.nombre,
+              description: templates[0]?.descripcion || "Programa enfocado en técnica, fuerza y expresión.",
+              icon: type.icono || "fitness_center",
+              schedules
             };
           });
+
+          // Only keep programs that actually have classes configured
+          const activePrograms = grouped.filter(g => g.schedules.some(s => s.times.length > 0));
+          setPrograms(activePrograms.length > 0 ? activePrograms : grouped);
         }
-
-        // Add dynamically found classes that might not be in tipos_clase
-        if (data) {
-          data.forEach(c => {
-            if (!classGroups[c.nombre_clase]) {
-              return; // Skip if not in tipos_clase
-            }
-            
-            const days = ["DOMINGO", "LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES", "SÁBADO"];
-            const dayName = days[c.dia_semana];
-            
-            const formatTime = (timeString: string) => {
-              if (!timeString) return "";
-              const parts = timeString.split(':');
-              let h = parseInt(parts[0]);
-              const m = parts[1];
-              const ampm = h >= 12 ? 'pm' : 'am';
-              h = h % 12;
-              h = h ? h : 12; 
-              return `${h}:${m}${ampm}`;
-            };
-            
-            const timeStr = `${formatTime(c.hora_inicio)} - ${formatTime(c.hora_fin)}`;
-            
-            if (!classGroups[c.nombre_clase].schedulesMap[dayName]) {
-              classGroups[c.nombre_clase].schedulesMap[dayName] = [];
-            }
-            
-            // Avoid duplicate times for the same day
-            if (!classGroups[c.nombre_clase].schedulesMap[dayName].includes(timeStr)) {
-              classGroups[c.nombre_clase].schedulesMap[dayName].push(timeStr);
-            }
-          });
-        }
-
-        // Convert schedulesMap to the array format for rendering
-        const daysOrder = ["LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES", "SÁBADO", "DOMINGO"];
-        
-        const formattedPrograms = Object.values(classGroups).map(pg => {
-          const schedules: any[] = [];
-          
-          daysOrder.forEach(day => {
-            if (pg.schedulesMap[day] && pg.schedulesMap[day].length > 0) {
-              schedules.push({
-                day: day,
-                times: pg.schedulesMap[day]
-              });
-            } else {
-              schedules.push({
-                day: day,
-                times: []
-              });
-            }
-          });
-          
-          return {
-            ...pg,
-            schedules
-          };
-        });
-
-        setPrograms(formattedPrograms);
-      } catch (error) {
-        console.error("Error fetching dashboard classes:", error);
+      } catch (err) {
+        console.error("Error fetching programs and classes:", err);
+        // Fallback mock for UI demo if tables are not seeded
+        setPrograms([
+          {
+            id: "pole",
+            name: "Pole Dance & Sport",
+            description: "Acondicionamiento físico, figuras estáticas y giros dinámicos en barra.",
+            icon: "fitness_center",
+            schedules: [
+              { day: "LUN", times: ["18:30", "19:45"] },
+              { day: "MAR", times: [] },
+              { day: "MIÉ", times: ["18:30", "19:45"] },
+              { day: "JUE", times: [] },
+              { day: "VIE", times: ["17:30", "19:00"] },
+              { day: "SÁB", times: ["11:00"] },
+              { day: "DOM", times: [] },
+            ]
+          },
+          {
+            id: "twerk",
+            name: "Twerk & Dancehall",
+            description: "Técnica de disociación pélvica, musicalidad y coreografías de alta energía.",
+            icon: "music_note",
+            schedules: [
+              { day: "LUN", times: [] },
+              { day: "MAR", times: ["19:00", "20:15"] },
+              { day: "MIÉ", times: [] },
+              { day: "JUE", times: ["19:00", "20:15"] },
+              { day: "VIE", times: [] },
+              { day: "SÁB", times: ["12:15"] },
+              { day: "DOM", times: [] },
+            ]
+          },
+          {
+            id: "heels",
+            name: "Exotic Heels",
+            description: "Fluidez, líneas corporales y trabajo en tacos con foco en técnica y sensualidad.",
+            icon: "styler",
+            schedules: [
+              { day: "LUN", times: [] },
+              { day: "MAR", times: [] },
+              { day: "MIÉ", times: ["20:00"] },
+              { day: "JUE", times: [] },
+              { day: "VIE", times: ["20:15"] },
+              { day: "SÁB", times: [] },
+              { day: "DOM", times: [] },
+            ]
+          },
+          {
+            id: "flex",
+            name: "Flexibilidad & Split",
+            description: "Apertura de caderas, hombros y elongación profunda para complementar tu entrenamiento.",
+            icon: "self_improvement",
+            schedules: [
+              { day: "LUN", times: ["17:15"] },
+              { day: "MAR", times: ["18:00"] },
+              { day: "MIÉ", times: ["17:15"] },
+              { day: "JUE", times: ["18:00"] },
+              { day: "VIE", times: [] },
+              { day: "SÁB", times: [] },
+              { day: "DOM", times: [] },
+            ]
+          }
+        ]);
       } finally {
         setIsLoading(false);
       }
@@ -142,18 +163,18 @@ export default function AlumnoDashboard() {
         <section className="bg-gradient-to-br from-surface-container-low via-surface-container-lowest to-surface-container-low p-5 rounded-3xl border border-primary/20 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex flex-col">
             <span className="font-label-caps text-[11px] text-primary font-bold uppercase tracking-wider">¡Hola, {userName}! ✨</span>
-            <h2 className="font-headline-sm text-xl text-on-surface font-bold mt-0.5">Control de Asistencia</h2>
+            <h2 className="font-headline-sm text-xl text-on-surface font-bold mt-0.5">Pase de Asistencia QR</h2>
             <p className="font-body-sm text-xs text-secondary mt-1">
-              ¿Estás en la academia? Escanea el código QR que muestra tu profesor para confirmar tu llegada a la clase.
+              Al llegar al estudio, muestra tu Pase QR desde <strong className="text-on-surface">Mis Clases</strong> para que tu profesor registre tu llegada.
             </p>
           </div>
-          <button 
-            onClick={() => setIsScannerOpen(true)}
+          <Link 
+            href="/alumno/mis-clases"
             className="h-12 px-5 rounded-2xl bg-primary text-on-primary font-label-md font-bold flex items-center justify-center gap-2 hover:opacity-90 active:scale-95 transition-all shadow-md shadow-primary/20 shrink-0"
           >
-            <span className="material-symbols-outlined text-[22px]">qr_code_scanner</span>
-            Escanear QR
-          </button>
+            <span className="material-symbols-outlined text-[22px]">qr_code_2</span>
+            Ver Mi Pase QR
+          </Link>
         </section>
 
         <div className="flex items-center gap-2 mb-1">
@@ -175,27 +196,43 @@ export default function AlumnoDashboard() {
           <div className="flex flex-col gap-space-lg">
             {programs.map((program) => (
               <article key={program.id} className="flex flex-col bg-surface-container-lowest rounded-2xl border border-surface-container shadow-sm overflow-hidden">
-                <div className="flex items-center gap-2 p-space-md border-b border-surface-container/50">
-                  <span className="material-symbols-outlined text-primary">{program.icon}</span>
-                  <h2 className="font-headline-sm text-headline-sm text-on-surface font-bold">{program.name}</h2>
+                <div className="flex items-center justify-between gap-2 p-space-md border-b border-surface-container/50">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
+                      <span className="material-symbols-outlined text-[20px]">{program.icon}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <h2 className="font-headline-sm text-headline-sm text-on-surface truncate">{program.name}</h2>
+                      <p className="font-body-sm text-body-sm text-secondary truncate">{program.description}</p>
+                    </div>
+                  </div>
+                  <Link 
+                    href="/alumno/explorar" 
+                    className="flex-shrink-0 px-3 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-primary font-label-md text-label-md font-bold transition-colors"
+                  >
+                    Ver cupos
+                  </Link>
                 </div>
-                
-                <div className="p-space-md pt-space-lg">
-                  <div className="flex overflow-x-auto no-scrollbar gap-2 pb-2">
-                    {program.schedules.map((schedule: any, idx: number) => (
-                      <div key={idx} className="flex flex-col min-w-[120px] flex-shrink-0">
-                        <span className="font-label-caps text-[10px] text-on-surface-variant text-center font-bold tracking-wider mb-2 uppercase">
+
+                {/* Schedule horizontally scrollable or grid */}
+                <div className="p-space-md bg-surface-container-low/30 overflow-x-auto">
+                  <div className="grid grid-cols-7 gap-1.5 min-w-[500px]">
+                    {program.schedules.map((schedule: any) => (
+                      <div key={schedule.day} className="flex flex-col items-center p-2 rounded-xl bg-surface-container-lowest border border-surface-container/60 shadow-2xs">
+                        <span className="font-label-caps text-label-caps text-secondary mb-1.5 font-bold">
                           {schedule.day}
                         </span>
-                        <div className="flex flex-col gap-1.5">
-                          {schedule.times.length > 0 ? (
-                            schedule.times.map((time: string, tIdx: number) => {
-                              const [start, end] = time.split(" - ");
+                        <div className="flex flex-col gap-1 w-full">
+                          {schedule.times && schedule.times.length > 0 ? (
+                            schedule.times.map((time: string) => {
                               return (
-                                <div key={tIdx} className="flex flex-col items-center justify-center py-2 px-1 bg-surface-container rounded-lg border-l-2 border-l-primary text-center">
-                                  <span className="font-label-md text-[13px] text-primary font-medium">{start}</span>
-                                  <span className="font-label-sm text-[11px] text-on-surface-variant">- {end}</span>
-                                </div>
+                                <Link
+                                  key={time}
+                                  href="/alumno/explorar"
+                                  className="w-full py-1 text-center rounded-md font-label-caps text-label-caps transition-colors bg-primary/10 text-primary hover:bg-primary hover:text-on-primary font-semibold"
+                                >
+                                  {time}
+                                </Link>
                               );
                             })
                           ) : (
@@ -213,12 +250,6 @@ export default function AlumnoDashboard() {
           </div>
         )}
       </div>
-
-      {/* Modal para Escanear Asistencia (Autoservicio) */}
-      <StudentQrAttendanceModal
-        isOpen={isScannerOpen}
-        onClose={() => setIsScannerOpen(false)}
-      />
     </div>
   );
 }

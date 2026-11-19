@@ -1,4 +1,4 @@
-type ClassValue = string | number | boolean | undefined | null | ClassValue[] | { [key: string]: any };
+type ClassValue = string | number | boolean | undefined | null | ClassValue[] | { [key: string]: unknown };
 
 function toVal(mix: ClassValue): string {
   let str = "";

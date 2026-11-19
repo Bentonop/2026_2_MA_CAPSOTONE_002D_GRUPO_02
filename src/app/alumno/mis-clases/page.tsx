@@ -5,7 +5,6 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { QRCodeSVG } from "qrcode.react";
 import toast from "react-hot-toast";
-import StudentQrAttendanceModal from "@/components/shared/StudentQrAttendanceModal";
 
 export default function MisClasesPage() {
   const [activeTab, setActiveTab] = useState("hoy");
@@ -14,9 +13,8 @@ export default function MisClasesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [cancellingId, setCancellingId] = useState<number | null>(null);
 
-  // Estados para modales de QR
+  // Estado para modal de Pase QR del alumno
   const [selectedReserva, setSelectedReserva] = useState<any | null>(null);
-  const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   const fetchMyClasses = async () => {
     if (!supabase) return;
@@ -172,14 +170,6 @@ export default function MisClasesPage() {
           </div>
           
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsScannerOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-xl border border-primary/30 font-label-md text-xs font-bold transition-all active:scale-95 shadow-sm"
-              title="Escanear código QR en la entrada o del profesor"
-            >
-              <span className="material-symbols-outlined text-[18px]">photo_camera</span>
-              Escanear Sala
-            </button>
             <div className="flex items-center gap-1.5 px-3.5 py-2 bg-surface-container-high rounded-xl border border-primary/20">
               <span className="material-symbols-outlined text-primary text-[18px]">local_activity</span>
               <span className="font-label-md text-label-md text-on-surface font-bold">{credits} créditos</span>
@@ -314,39 +304,38 @@ export default function MisClasesPage() {
                           Asistencia Confirmada
                         </div>
                       ) : (
-                        <>
-                          <button 
-                            onClick={() => setSelectedReserva(cls)}
-                            className="flex-1 h-14 bg-primary text-on-primary rounded-xl font-label-lg font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-all shadow-sm"
-                          >
-                            <span className="material-symbols-outlined text-[20px]">qr_code_2</span>
-                            Mi Pase QR
-                          </button>
-                          <button 
-                            onClick={() => setIsScannerOpen(true)}
-                            className="h-14 px-4 bg-surface-container-high text-primary border border-primary/20 rounded-xl font-label-lg font-bold flex items-center justify-center gap-1.5 hover:bg-surface-container-highest transition-all shadow-sm"
-                            title="Escanear código mostrado por el profesor"
-                          >
-                            <span className="material-symbols-outlined text-[20px]">photo_camera</span>
-                            Escanear
-                          </button>
-                        </>
+                        <button 
+                          onClick={() => setSelectedReserva(cls)}
+                          className="flex-1 h-14 bg-primary text-on-primary rounded-xl font-label-lg font-bold flex items-center justify-center gap-2 hover:opacity-90 active:scale-95 transition-all shadow-md shadow-primary/20"
+                        >
+                          <span className="material-symbols-outlined text-[20px]">qr_code_2</span>
+                          Mi Pase QR
+                        </button>
                       )
                     ) : (
-                      <Link
-                        href="/alumno/explorar"
-                        className="flex-1 h-14 bg-surface-container-high text-on-surface rounded-xl font-label-lg font-medium flex items-center justify-center gap-2 hover:bg-surface-container-highest transition-all"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">edit_calendar</span>
-                        Reagendar
-                      </Link>
+                      <div className="flex-1 flex gap-2">
+                        <button 
+                          onClick={() => setSelectedReserva(cls)}
+                          className="flex-1 h-14 bg-surface-container-high text-primary border border-primary/20 rounded-xl font-label-lg font-bold flex items-center justify-center gap-1.5 hover:bg-surface-container-highest transition-all"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">qr_code_2</span>
+                          Ver Pase
+                        </button>
+                        <Link
+                          href="/alumno/explorar"
+                          className="flex-1 h-14 bg-surface-container-high text-on-surface rounded-xl font-label-lg font-medium flex items-center justify-center gap-2 hover:bg-surface-container-highest transition-all"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">edit_calendar</span>
+                          Reagendar
+                        </Link>
+                      </div>
                     )}
 
                     {!isPresente && (
                       <button 
                         onClick={() => handleCancelarReserva(cls)}
                         disabled={cancellingId === cls.id_reserva}
-                        className={`${isToday ? 'w-[100px]' : 'flex-1'} h-14 bg-surface-container-high text-on-surface rounded-xl font-label-lg font-medium flex items-center justify-center gap-2 hover:bg-surface-container-highest transition-all disabled:opacity-50`}
+                        className={`${isToday ? 'w-[100px]' : 'w-[100px]'} h-14 bg-surface-container-high text-on-surface rounded-xl font-label-lg font-medium flex items-center justify-center gap-2 hover:bg-surface-container-highest transition-all disabled:opacity-50`}
                       >
                         {cancellingId === cls.id_reserva ? (
                           <span className="material-symbols-outlined animate-spin text-[18px]">refresh</span>
@@ -364,25 +353,31 @@ export default function MisClasesPage() {
         </div>
       </div>
 
-      {/* Modal Pase de Entrada QR (Opción A: Alumno muestra su código) */}
+      {/* Modal Pase de Entrada QR (El alumno muestra su código al profesor) */}
       {selectedReserva && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in">
           <div className="bg-surface-container-lowest p-6 rounded-3xl max-w-sm w-full text-center shadow-2xl border border-surface-container flex flex-col items-center">
             
-            <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary mb-3">
-              <span className="material-symbols-outlined text-[24px]">qr_code_2</span>
+            <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary mb-2">
+              <span className="material-symbols-outlined text-[26px]">qr_code_2</span>
             </div>
 
-            <h2 className="font-headline-sm text-[20px] text-on-surface font-bold">Pase de Ingreso</h2>
-            <p className="font-body-sm text-[13px] text-on-surface-variant mb-5 mt-1">
-              Muestra este código al profesor para confirmar tu asistencia a <strong className="text-on-surface">{selectedReserva.clase.nombre_clase}</strong>.
+            <h2 className="font-headline-sm text-xl text-on-surface font-bold">Pase de Ingreso</h2>
+            <p className="font-body-sm text-xs text-secondary mt-0.5 mb-1 font-semibold">
+              {selectedReserva.clase.nombre_clase}
+            </p>
+            <p className="font-body-sm text-xs text-on-surface-variant mb-4">
+              Muestra este código al profesor para que registre tu asistencia a la sala.
             </p>
 
-            <div className="p-4 bg-white rounded-2xl border border-surface-container shadow-inner flex justify-center items-center">
+            <div className="p-4 bg-white rounded-2xl border border-surface-container shadow-md flex justify-center items-center">
               <QRCodeSVG 
                 value={JSON.stringify({
+                  tipo: "asistencia_alumno",
                   id_reserva: selectedReserva.id_reserva,
-                  id_clase: selectedReserva.clase.id_clase
+                  id_clase: selectedReserva.clase.id_clase,
+                  id_usuario: selectedReserva.id_usuario,
+                  clase: selectedReserva.clase.nombre_clase
                 })} 
                 size={210} 
                 level="H" 
@@ -390,22 +385,19 @@ export default function MisClasesPage() {
               />
             </div>
 
+            <div className="mt-3 text-[11px] text-on-surface-variant font-mono bg-surface-container-high/40 px-3 py-1 rounded-full">
+              Reserva #{selectedReserva.id_reserva} • {selectedReserva.clase.sala || "Sala Principal"}
+            </div>
+
             <button
               onClick={() => setSelectedReserva(null)}
-              className="mt-6 w-full py-3.5 bg-surface-container-high text-on-surface font-label-lg font-bold rounded-xl hover:bg-surface-container-highest transition-all"
+              className="mt-5 w-full py-3.5 bg-surface-container-high text-on-surface font-label-lg font-bold rounded-xl hover:bg-surface-container-highest active:scale-95 transition-all text-sm"
             >
               Cerrar Pase
             </button>
           </div>
         </div>
       )}
-
-      {/* Modal Lector de QR (Opción B: Alumno escanea al profesor / sala) */}
-      <StudentQrAttendanceModal
-        isOpen={isScannerOpen}
-        onClose={() => setIsScannerOpen(false)}
-        onSuccess={() => fetchMyClasses()}
-      />
 
     </div>
   );

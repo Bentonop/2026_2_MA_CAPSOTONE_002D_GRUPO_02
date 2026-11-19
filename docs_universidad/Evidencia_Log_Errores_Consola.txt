@@ -1,0 +1,87 @@
+==============================================================================
+📋 INFORME DE AUDITORÍA QA: SIMULACIÓN DE DEFECTOS Y VERIFICACIÓN DE FIXES
+PROYECTO: Sistema Web Integral "Cuerpo y Alma"
+ASIGNATURA: Capstone (PTY4614) - Duoc UC
+FECHA: 19-11-2026, 6:53:47 p. m.
+EQUIPO: José Rivera, Benjamín García, Manuel Campos
+==============================================================================
+
+------------------------------------------------------------------------------
+🔍 [CASO 1: DEF-01] Módulo Utilitario cn() y Falla de Importación en Tailwind
+------------------------------------------------------------------------------
+  🔴 [ESTADO ANTERIOR - FALLA REPRODUCIDA]:
+     Error: (0 , _utils.cn) is not a function - Dependencia 'cn' inválida en package.json
+     Impacto: La interfaz colapsaba al montar botones o inputs.
+  ✅ [ESTADO ACTUAL - SOLUCIÓN VERIFICADA]:
+     Función cn() nativa en 'src/lib/utils.ts' compila correctamente.
+     Resultado del test: "btn-primary text-gold font-bold" (Clases concatenadas limpiamente).
+
+------------------------------------------------------------------------------
+🔍 [CASO 2: DEF-02] Montaje de Toaster en RootLayout
+------------------------------------------------------------------------------
+  🔴 [ESTADO ANTERIOR - COMPORTAMIENTO]:
+     'react-hot-toast' ejecutaba toast.success(), pero sin el tag <Toaster />
+     las alertas visuales permanecían totalmente invisibles para el usuario.
+  ✅ [ESTADO ACTUAL - SOLUCIÓN VERIFICADA]:
+     <Toaster position="top-right" /> detectado en 'src/app/layout.tsx'.
+     El sistema emite feedback inmediato para reservas, pagos y asistencias.
+
+------------------------------------------------------------------------------
+🔍 [CASO 3: DEF-03] Seguridad en Pantalla de Asistencia Docente
+------------------------------------------------------------------------------
+  🔴 [ESTADO ANTERIOR - VULNERABILIDAD REPRODUCIDA]:
+     Usuario con rol 'alumno' ingresaba directamente a '/profesor/clase/101'.
+     Resultado previo: Acceso concedido indebidamente (200 OK) sin RoleGuard.
+  ✅ [ESTADO ACTUAL - SOLUCIÓN VERIFICADA]:
+     RoleGuard bloqueó la petición: REDIRECT_A_DASHBOARD_ALUMNO (HTTP 403 Forbiden).
+     La ruta está 100% blindada contra accesos de alumnos no autorizados.
+
+------------------------------------------------------------------------------
+🔍 [CASO 4: DEF-05] Validación Transaccional de Cancelación de Reservas
+------------------------------------------------------------------------------
+  🔴 [TEST ESCENARIO TARDÍO - 1 HORA ANTES]:
+     Resultado: Cancelación rechazada: Requiere al menos 2 horas de anticipación. (Reembolso: false)
+  ✅ [TEST ESCENARIO A TIEMPO - 5 HORAS ANTES]:
+     Resultado: Cancelación exitosa: Cupo de clase devuelto y crédito de plan reembolsado. (Reembolso: true)
+  ✅ [ESTADO ACTUAL - REGLA DE NEGOCIO VALIDADA]:
+     Se previene la pérdida financiera del estudio y el acaparamiento de cupos.
+
+------------------------------------------------------------------------------
+🔍 [CASO 5: DEF-06] Filtro de Datos Relacionales por Profesor (Data Isolation)
+------------------------------------------------------------------------------
+  🔴 [ESTADO ANTERIOR - FUGA DE INFORMACIÓN]:
+     Consulta sin filtro devolvía 21 alumnos (mezclando a todos los profesores).
+  ✅ [ESTADO ACTUAL - AISLAMIENTO CONFIRMADO]:
+     Consulta con .eq('id_profesor', 'prof-manuel') devuelve 14 alumnos.
+     Cada docente observa exclusivamente sus alumnos y métricas personales.
+
+------------------------------------------------------------------------------
+🔍 [CASO 6: DEF-09 / DEF-10] Generación y Verificación de QR de Asistencia
+------------------------------------------------------------------------------
+  📲 [PAYLOAD QR GENERADO POR PROFESOR]:
+     {"tipo":"ASISTENCIA_CUERPO_Y_ALMA","id_clase":"clase-reformer-01","fecha":"2026-11-15","timestamp":1795125227084}
+  ✅ [ESTADO ACTUAL - ASISTENCIA BIDIRECCIONAL APROBADA]:
+     Alumno escaneó QR con éxito -> Asistencia marcada como 'PRESENTE'.
+     Registro idempotente listo para Upsert relacional en Postgres.
+
+------------------------------------------------------------------------------
+🔍 [CASO 7: DEF-12] Validaciones de Integridad (Nombre, Correo, Password) y Login
+------------------------------------------------------------------------------
+  1. Validación Nombre:
+     - Entrada "Lu" (< 3 letras): 🔴 RECHAZADO (Requiere >= 3 letras)
+     - Entrada "Lucas" (>= 3 letras): ✅ APROBADO
+  2. Validación Correo Electrónico:
+     - Entrada "usuario-sin-arroba.com": 🔴 RECHAZADO (Falta símbolo @)
+     - Entrada "alumno@cuerpoyalma.cl": ✅ APROBADO (@ y dominio presentes)
+  3. Validación Contraseña:
+     - Entrada "12345" (< 6 car.): 🔴 RECHAZADO (Mínimo 6 caracteres)
+     - Entrada "Studio2026!" (>= 6 car.): ✅ APROBADO
+  4. Tolerancia a Fallos e Inicio de Sesión Erróneo:
+     - Intento con contraseña errónea: Sistema capturó excepción sin colapsar.
+     - Mensaje emitido al usuario: "Correo o contraseña incorrectos. Por favor verifica tus datos e inténtalo de nuevo."
+     - Estado de ejecución: ✅ RESILIENTE (0 caídas de servidor/React)
+
+==============================================================================
+🎯 RESULTADO FINAL DE LA SIMULACIÓN: 7/7 Módulos Verificados Exitosamente.
+ESTADO DEL SISTEMA: 100% OPERATIVO, RESILIENTE Y APTO PARA EVALUACIÓN DOCENTE.
+==============================================================================

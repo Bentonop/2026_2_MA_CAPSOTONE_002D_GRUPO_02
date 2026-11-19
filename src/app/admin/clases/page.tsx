@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { deleteClassesCascade } from "@/lib/clases";
+import toast from "react-hot-toast";
 
 interface Profile {
   id: string;
@@ -121,7 +122,7 @@ export default function AdminGestionPage() {
       .maybeSingle();
 
     if (existingInvite) {
-      alert("Error: Este correo ya tiene una invitación pendiente.");
+      toast.error("Error: Este correo ya tiene una invitación pendiente.");
       return;
     }
 
@@ -133,7 +134,7 @@ export default function AdminGestionPage() {
       .maybeSingle();
 
     if (existingProfile) {
-      alert("Error: Este correo ya tiene una cuenta registrada en la plataforma.");
+      toast.error("Error: Este correo ya tiene una cuenta registrada en la plataforma.");
       return;
     }
       
@@ -147,7 +148,7 @@ export default function AdminGestionPage() {
     }]);
     
     if (error) {
-      alert("Error al invitar. Quizás el correo ya está invitado.");
+      toast.error("Error al invitar. Quizás el correo ya está invitado.");
     } else {
       showToast(`Invitación enviada. Enviando correo...`);
       
@@ -300,7 +301,7 @@ export default function AdminGestionPage() {
     if (!supabase) return;
     
     if (tDays.length === 0) {
-      alert("Por favor selecciona al menos un día para este bloque.");
+      toast.error("Por favor selecciona al menos un día para este bloque.");
       return;
     }
 
@@ -319,7 +320,7 @@ export default function AdminGestionPage() {
     const { error } = await supabase.from('plantillas_clase').insert(inserts);
 
     if (error) {
-      alert("Error al guardar plantilla. ¿Ejecutaste el script horarios_fijos.sql en Supabase?");
+      toast.error("Error al guardar plantilla. ¿Ejecutaste el script horarios_fijos.sql en Supabase?");
       return;
     }
 
@@ -443,7 +444,7 @@ export default function AdminGestionPage() {
       fetchRealClasses();
     } catch (err: any) {
       console.error(err);
-      alert("Error al eliminar: " + (err.message || err));
+      toast.error("Error al eliminar: " + (err.message || err));
     }
   };
 
@@ -488,7 +489,7 @@ export default function AdminGestionPage() {
       fetchRealClasses();
     } catch (err: any) {
       console.error(err);
-      alert("Error al eliminar la clase: " + (err.message || err));
+      toast.error("Error al eliminar la clase: " + (err.message || err));
     }
   };
 
@@ -568,7 +569,7 @@ export default function AdminGestionPage() {
       fetchRealClasses();
     } catch (err: any) {
       console.error(err);
-      alert("Error al generar las clases: " + err.message);
+      toast.error("Error al generar las clases: " + err.message);
     } finally {
       setIsGenerating(false);
     }

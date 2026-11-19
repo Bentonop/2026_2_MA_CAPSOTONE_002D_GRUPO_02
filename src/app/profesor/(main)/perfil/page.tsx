@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import toast from "react-hot-toast";
 
 export default function PerfilProfesorPage() {
   const [profile, setProfile] = useState<any>(null);
@@ -72,9 +73,10 @@ export default function PerfilProfesorPage() {
       if (error) throw error;
       setProfile({ ...profile, ...formData });
       setIsEditing(false);
+      toast.success("Perfil docente actualizado con éxito");
     } catch (err) {
       console.error("Error saving", err);
-      alert("Error al guardar perfil");
+      toast.error("Error al guardar perfil");
     } finally {
       setIsSaving(false);
     }
@@ -87,7 +89,7 @@ export default function PerfilProfesorPage() {
 
   const handleDeleteAccount = async () => {
     if (window.confirm("¿Estás segura de que quieres eliminar tu cuenta permanentemente? Perderás todas tus clases y alumnos asignados.")) {
-      alert("Tu cuenta ha sido eliminada del sistema.");
+      toast.success("Tu cuenta ha sido eliminada del sistema.");
       await supabase.auth.signOut();
       window.location.href = "/";
     }
@@ -126,7 +128,13 @@ export default function PerfilProfesorPage() {
          <div className="absolute top-[-50px] left-[-50px] w-48 h-48 bg-primary/40 rounded-full blur-2xl"></div>
          
          {/* Botón de configuración flotante */}
-         <button className="absolute top-4 right-4 w-10 h-10 rounded-full bg-black/20 backdrop-blur-md text-white flex items-center justify-center hover:bg-black/30 transition-all active:scale-95 border border-white/10 shadow-lg">
+         <button
+           type="button"
+           onClick={() => setIsEditing((prev) => !prev)}
+           aria-label={isEditing ? "Cerrar edición de perfil" : "Editar perfil"}
+           title={isEditing ? "Cerrar edición" : "Editar perfil"}
+           className="absolute top-4 right-4 w-10 h-10 rounded-full bg-black/20 backdrop-blur-md text-white flex items-center justify-center hover:bg-black/30 transition-all active:scale-95 border border-white/10 shadow-lg"
+         >
             <span className="material-symbols-outlined text-[20px]">settings</span>
          </button>
       </div>

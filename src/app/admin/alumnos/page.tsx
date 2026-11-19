@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
+import { exportAlumnosYPagosToExcel, exportFinanzasToExcel } from "@/lib/exportExcel";
 
 interface Profile {
   id: string;
@@ -48,6 +49,26 @@ export default function AdminAlumnosPage() {
   const [editEmergencia, setEditEmergencia] = useState("");
   const [editFicha, setEditFicha] = useState("");
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExportExcel = async () => {
+    if (!supabase) return;
+    setIsExporting(true);
+    try {
+      if (activeTab === "pagos") {
+        const count = await exportFinanzasToExcel(supabase);
+        toast.success(`Reporte de pagos descargado (${count} transacciones).`);
+      } else {
+        const count = await exportAlumnosYPagosToExcel(supabase);
+        toast.success(`Reporte de alumnos descargado (${count} alumnos).`);
+      }
+    } catch (err: unknown) {
+      console.error("Error al exportar Excel:", err);
+      toast.error("No se pudo generar el archivo Excel. Intenta nuevamente.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -277,17 +298,30 @@ export default function AdminAlumnosPage() {
   return (
     <div className="flex flex-col w-full pb-10 min-h-screen bg-surface">
       <header className="pt-safe pb-4 px-margin-mobile flex flex-col justify-end sticky top-0 z-10 glass-panel border-x-0 border-t-0 rounded-none border-b border-surface-container shadow-sm min-h-[90px]">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <h1 className="font-headline-md text-headline-md gradient-text font-bold">Gestión de Alumnos</h1>
-          {activeTab === "alumnos" && (
-            <button 
-              onClick={() => setIsInviteModalOpen(true)}
-              className="px-4 h-10 rounded-full premium-btn flex items-center gap-2 shadow-sm active:scale-95 transition-transform font-bold text-sm"
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleExportExcel}
+              disabled={isExporting}
+              title="Descargar reporte a Excel (.csv compatible con Microsoft Excel y Google Sheets)"
+              className="px-3.5 h-10 rounded-full border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 flex items-center gap-1.5 shadow-sm active:scale-95 transition-all font-bold text-xs disabled:opacity-50"
             >
-              <span className="material-symbols-outlined text-[20px]">mail</span>
-              Invitar
+              <span className={`material-symbols-outlined text-[18px] ${isExporting ? 'animate-spin' : ''}`}>
+                {isExporting ? 'refresh' : 'download'}
+              </span>
+              <span>{isExporting ? 'Generando...' : activeTab === 'pagos' ? 'Descargar Excel Pagos' : 'Descargar Excel'}</span>
             </button>
-          )}
+            {activeTab === "alumnos" && (
+              <button 
+                onClick={() => setIsInviteModalOpen(true)}
+                className="px-4 h-10 rounded-full premium-btn flex items-center gap-2 shadow-sm active:scale-95 transition-transform font-bold text-sm"
+              >
+                <span className="material-symbols-outlined text-[20px]">mail</span>
+                Invitar
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
