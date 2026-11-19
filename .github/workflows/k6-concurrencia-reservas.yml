@@ -1,0 +1,117 @@
+name: Pruebas de Carga y Concurrencia k6 - Reservas Cuerpo y Alma
+
+on:
+  workflow_dispatch:
+    inputs:
+      escenario:
+        description: 'Escenario de prueba a ejecutar'
+        required: true
+        type: choice
+        default: 'ambos'
+        options:
+          - avalancha-200
+          - mismo-usuario-canje
+          - ambos
+      class_id:
+        description: 'ID numérico de la clase en PostgreSQL (public.clase.id_clase)'
+        required: true
+        default: '1'
+      cupo_maximo:
+        description: 'Cupo máximo real de la clase (por defecto 8 en Cuerpo y Alma)'
+        required: true
+        default: '8'
+      vus_avalancha:
+        description: 'Cantidad de usuarios virtuales simultáneos para la avalancha'
+        required: true
+        default: '200'
+
+jobs:
+  k6-concurrency-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar k6 (Grafana)
+        uses: grafana/setup-k6-action@v1
+
+      - name: Escenario A - Avalancha de 200 usuarios simultáneos (Race Condition y Latencia)
+        if: ${{ inputs.escenario == 'avalancha-200' || inputs.escenario == 'ambos' }}
+        id: avalancha
+        continue-on-error: true
+        uses: grafana/run-k6-action@v1
+        with:
+          path: ./tests/k6/avalancha-200-usuarios.js
+          flags: --summary-export=summary-avalancha.json
+        env:
+          API_URL: ${{ secrets.STAGING_RESERVAS_API_URL }}
+          API_TOKEN: ${{ secrets.STAGING_API_TOKEN }}
+          LOAD_TEST_KEY: ${{ secrets.K6_LOAD_TEST_SECRET }}
+          USER_IDS: ${{ secrets.K6_TEST_USER_IDS }}
+          CLASS_ID: ${{ inputs.class_id }}
+          CUPO_MAXIMO: ${{ inputs.cupo_maximo }}
+          VUS: ${{ inputs.vus_avalancha }}
+
+      - name: Escenario B - Mismo usuario realizando múltiples canjes simultáneos
+        if: ${{ inputs.escenario == 'mismo-usuario-canje' || inputs.escenario == 'ambos' }}
+        id: mismo_usuario
+        continue-on-error: true
+        uses: grafana/run-k6-action@v1
+        with:
+          path: ./tests/k6/mismo-usuario-doble-canje.js
+          flags: --summary-export=summary-mismo-usuario.json
+        env:
+          API_URL: ${{ secrets.STAGING_RESERVAS_API_URL }}
+          API_TOKEN: ${{ secrets.STAGING_API_TOKEN }}
+          LOAD_TEST_KEY: ${{ secrets.K6_LOAD_TEST_SECRET }}
+          TARGET_USER_ID: ${{ secrets.K6_SINGLE_USER_ID }}
+          CLASS_ID: ${{ inputs.class_id }}
+          VUS_MISMO_USUARIO: '30'
+
+      - name: Generar Resumen de Latencia y Concurrencia en GitHub Summary
+        if: always()
+        run: |
+          echo "## Resultados de Concurrencia y Latencia (k6) - Cuerpo y Alma" >> $GITHUB_STEP_SUMMARY
+          python3 - << 'EOF'
+          import json, os
+
+          def report(fname, title):
+              if not os.path.exists(fname):
+                  return
+              with open(fname) as f:
+                  data = json.load(f)
+              m = data.get("metrics", {})
+              dur = m.get("http_req_duration", {}).get("values", {})
+              lines = [
+                  f"### {title}",
+                  "| Métrica | Valor |",
+                  "| :--- | :--- |",
+                  f"| Latencia Promedio | {dur.get('avg', 0):.2f} ms |",
+                  f"| Latencia p(95) | {dur.get('p(95)', 0):.2f} ms |",
+                  f"| Latencia Máxima | {dur.get('max', 0):.2f} ms |",
+              ]
+              for key in ["reservas_exitosas", "rechazadas_por_cupo", "rechazadas_duplicado_o_sin_creditos",
+                          "errores_servidor_o_bloqueo", "mismo_usuario_reservas_exitosas",
+                          "mismo_usuario_rechazos_controlados", "mismo_usuario_errores_servidor"]:
+                  if key in m:
+                      lines.append(f"| `{key}` | {m[key]['values'].get('count', 0)} |")
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
+                  out.write("\n".join(lines) + "\n\n")
+
+          report("summary-avalancha.json", "Escenario A: Avalancha 200 Usuarios")
+          report("summary-mismo-usuario.json", "Escenario B: Mismo Usuario - Doble Canje")
+          EOF
+
+      - name: Subir reportes JSON como Artifact (evidencia para Informe APT)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-resultados-concurrencia
+          path: |
+            summary-*.json
+
+      - name: Validar umbrales finales (fallar job si hubo overbooking o error 5xx)
+        if: steps.avalancha.outcome == 'failure' || steps.mismo_usuario.outcome == 'failure'
+        run: |
+          echo "Uno o más umbrales de k6 fallaron (revisar resumen y logs arriba)."
+          exit 1

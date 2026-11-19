@@ -282,42 +282,70 @@ function ExplorarContent() {
     if (!selectedClassToBook || !activeSubscription) return;
     setIsBooking(true);
     try {
-       if (!supabase) return;
-       // 1. Insert into reserva
-       const { error: reserveError } = await supabase.from("reserva").insert({
-         id_usuario: activeSubscription.user_id,
-         id_clase: parseInt(selectedClassToBook.id),
-         estado_reserva: 'confirmada',
-         fecha_operacion: new Date().toISOString()
-       });
-       if (reserveError) throw reserveError;
+      if (!supabase) return;
+      const classIdNum = parseInt(selectedClassToBook.id);
+      const { data: { session } } = await supabase.auth.getSession();
 
-       // 2. Increment enrolled count in clase
-       const newEnrolled = selectedClassToBook.enrolled + 1;
-       const { error: clError } = await supabase.from("clase").update({
-         cupos_inscritos: newEnrolled
-       }).eq("id_clase", parseInt(selectedClassToBook.id));
-       if (clError) throw clError;
+      let newEnrolled = selectedClassToBook.enrolled + 1;
+      let newCredits = activeSubscription.creditos_restantes - 1;
+      let bookedAtomically = false;
 
-       // 3. Deduct credit
-       const { error: updateError } = await supabase.from("user_suscripciones").update({
-         creditos_restantes: activeSubscription.creditos_restantes - 1
-       }).eq("id", activeSubscription.id);
-       if (updateError) throw updateError;
-       
-       // Update local state
-       setActiveSubscription({...activeSubscription, creditos_restantes: activeSubscription.creditos_restantes - 1});
-       setMisReservas([...misReservas, selectedClassToBook.id]);
-       setClasses(classes.map(c => c.id === selectedClassToBook.id ? {...c, enrolled: newEnrolled} : c));
-       
-       setIsReservationModalOpen(false);
-       showToast("Reserva confirmada con éxito");
-       
-    } catch(err) {
-       console.error("Error booking", err);
-       alert("Error al confirmar la reserva");
+      if (session?.access_token) {
+        const res = await fetch("/api/reservas", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ classId: classIdNum }),
+        });
+        const result = await res.json();
+
+        if (res.ok && result?.ok) {
+          bookedAtomically = true;
+          newEnrolled = result.cupos_inscritos ?? newEnrolled;
+          newCredits = result.creditos_restantes ?? newCredits;
+        } else if (res.status === 409 || res.status === 400) {
+          setIsReservationModalOpen(false);
+          showToast(result?.mensaje || "No se pudo completar la reserva");
+          return;
+        } else if (result?.codigo !== "DB_ERROR") {
+          throw new Error(result?.mensaje || "Error al confirmar la reserva");
+        }
+      }
+
+      if (!bookedAtomically) {
+        // Fallback legado si la RPC reservar_clase_atomica aún no se ejecutó en Supabase
+        const { error: reserveError } = await supabase.from("reserva").insert({
+          id_usuario: activeSubscription.user_id,
+          id_clase: classIdNum,
+          estado_reserva: 'confirmada',
+          fecha_operacion: new Date().toISOString()
+        });
+        if (reserveError) throw reserveError;
+
+        const { error: clError } = await supabase.from("clase").update({
+          cupos_inscritos: newEnrolled
+        }).eq("id_clase", classIdNum);
+        if (clError) throw clError;
+
+        const { error: updateError } = await supabase.from("user_suscripciones").update({
+          creditos_restantes: newCredits
+        }).eq("id", activeSubscription.id);
+        if (updateError) throw updateError;
+      }
+
+      setActiveSubscription({ ...activeSubscription, creditos_restantes: newCredits });
+      setMisReservas([...misReservas, selectedClassToBook.id]);
+      setClasses(classes.map(c => c.id === selectedClassToBook.id ? { ...c, enrolled: newEnrolled } : c));
+
+      setIsReservationModalOpen(false);
+      showToast("Reserva confirmada con éxito");
+    } catch (err) {
+      console.error("Error booking", err);
+      alert("Error al confirmar la reserva");
     } finally {
-       setIsBooking(false);
+      setIsBooking(false);
     }
   };
 
