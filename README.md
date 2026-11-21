@@ -31,7 +31,7 @@ El sistema cuenta con tres tipos de perfiles, cada uno con paneles e interfaces 
 Para que cualquier miembro del equipo pueda levantar el proyecto en su máquina, deben seguir estos pasos:
 
 ### 1. Requisitos Previos
-- Instalar **Node.js** (v18 o superior).
+- Instalar **Node.js** (v20.9 o superior).
 - Solicitar al administrador las credenciales del entorno de **Supabase**.
 
 ### 2. Instalación
@@ -48,6 +48,8 @@ En las siguientes carpetas encontrarás los archivos `.sql` correspondientes:
 - `Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicacion/Proyecto/database_scripts/` (`planes.sql`, `pagos.sql`, `salas.sql`, `ficha_medica.sql`, `demo_seed.sql`, etc.)
 
 Estos archivos son el esqueleto de la base de datos. Si estás montando una base de datos desde cero, **debes ejecutar el contenido de estos archivos** en el *SQL Editor* de Supabase.
+
+Para una base existente, ejecuta `Proyecto/database_scripts/asistencia_qr.sql` para actualizar el esquema de asistencia y aplica las políticas de asistencia de `rls_politicas_seguridad.sql`. Aplica también `Proyecto/database_scripts/reservar_clase_atomica.sql` para habilitar las reservas concurrentes.
 
 ### 4. Variables de Entorno
 Crea un archivo llamado `.env.local` dentro de la carpeta del proyecto (`Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicacion/Proyecto/`) y añade las claves de Supabase:

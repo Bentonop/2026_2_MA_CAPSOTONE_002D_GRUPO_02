@@ -6,6 +6,7 @@ import toast from "react-hot-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/lib/supabase";
+import BrandLogo from "@/components/ui/BrandLogo";
 import { AlertCircle } from "lucide-react";
 
 function hasAuthErrorInUrl() {
@@ -27,6 +28,7 @@ export default function ActualizarContrasenaPage() {
   const [hasSession, setHasSession] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [showPasswords, setShowPasswords] = useState(false);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -111,6 +113,7 @@ export default function ActualizarContrasenaPage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-surface p-4">
       <section className="w-full max-w-lg rounded-3xl bg-background p-6 shadow-sm sm:p-8">
+        <div className="mb-3 flex justify-center"><BrandLogo size="lg" showText /></div>
         <h1 className="text-center text-3xl font-semibold">Nueva contraseña</h1>
         <p className="mb-4 mt-3 text-center text-sm text-muted-foreground">
           Ingresa y confirma la contraseña nueva para tu cuenta.
@@ -128,7 +131,7 @@ export default function ActualizarContrasenaPage() {
               Nueva contraseña
               <Input
                 id="new-password"
-                type="password"
+                type={showPasswords ? "text" : "password"}
                 autoComplete="new-password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
@@ -140,13 +143,17 @@ export default function ActualizarContrasenaPage() {
               Confirmar contraseña
               <Input
                 id="confirm-password"
-                type="password"
+                type={showPasswords ? "text" : "password"}
                 autoComplete="new-password"
                 value={confirmPassword}
                 onChange={(event) => setConfirmPassword(event.target.value)}
                 disabled={isSaving}
               />
             </label>
+
+            <Button type="button" variant="ghost" onClick={() => setShowPasswords(!showPasswords)}>
+              {showPasswords ? "Ocultar contraseñas" : "Mostrar contraseñas"}
+            </Button>
 
             <Button type="submit" disabled={isSaving}>
               {isSaving ? "Guardando…" : "Guardar contraseña"}

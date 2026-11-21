@@ -14,6 +14,9 @@
 | **`Carta_Gantt_Semana10.png`** | Captura de la Carta Gantt Ágil oficial con corte en la Semana 10 (Sprint 3). | Imagen (.png) |
 | **`rls_politicas_seguridad.sql`** | Script SQL con las políticas Row Level Security (RLS), triggers de aforo máximo (8 cupos) y publicaciones Realtime. | SQL (.sql) |
 | **`full_database_setup.sql`** | Script SQL completo de inicialización del esquema de base de datos relacional y datos demo. | SQL (.sql) |
+| **`INFORME_COMPLETO_DE_MEJORAS_Y_EVIDENCIAS.md`** | Informe técnico detallado de todas las mejoras, arquitectura, diseño y validaciones construidas en el proyecto. | Markdown (.md) |
+| **`BITACORA_DE_ERRORES_QA.md`** | Bitácora formal de control de calidad, defectos (DEF-01 al DEF-12), causas raíz, código antes/después y criterios de aceptación (IEEE 829). | Markdown (.md) |
+| **`Evidencia_Log_Errores_Consola.txt`** | Log formal generado por el simulador de QA en consola (`database_scripts/test_simulacion_errores_qa.mjs`) que reproduce y valida los errores corregidos. | Texto (.txt) |
 | **`Evidencia_Pruebas_RLS_Consola.txt`** | Log formal de ejecución de las pruebas unitarias y de integración (5/5 pruebas aprobadas). | Texto (.txt) |
 
 ---

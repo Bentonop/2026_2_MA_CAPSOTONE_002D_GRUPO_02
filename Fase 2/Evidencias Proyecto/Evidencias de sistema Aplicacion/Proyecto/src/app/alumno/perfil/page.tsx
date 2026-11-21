@@ -1,7 +1,8 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+import toast from "react-hot-toast";
 
 function formatPlanDate(value: string | null, fallback: string) {
   if (!value) return fallback;
@@ -96,9 +97,10 @@ export default function AlumnoPerfilPage() {
       
       setProfile({ ...profile, ...formData });
       setIsEditing(false);
+      toast.success("Perfil actualizado con éxito");
     } catch (err) {
       console.error("Error saving profile", err);
-      alert("Error al guardar el perfil");
+      toast.error("Error al guardar el perfil");
     } finally {
       setIsSaving(false);
     }
@@ -111,7 +113,7 @@ export default function AlumnoPerfilPage() {
 
   const handleDeleteAccount = async () => {
     if (window.confirm("¿Estás segura de que quieres eliminar tu cuenta permanentemente? Perderás todos tus planes y reservas.")) {
-      alert("Tu cuenta ha sido eliminada del sistema.");
+      toast.success("Tu cuenta ha sido eliminada del sistema.");
       await supabase.auth.signOut();
       window.location.href = "/";
     }

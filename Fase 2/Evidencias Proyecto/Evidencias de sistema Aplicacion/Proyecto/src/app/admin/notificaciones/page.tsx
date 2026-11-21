@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { deleteClassesCascade } from "@/lib/clases";
+import toast from "react-hot-toast";
 
 interface Notificacion {
   id: string;
@@ -108,11 +109,11 @@ export default function AdminNotificacionesPage() {
 
     try {
       await deleteClassesCascade(supabase, claseId);
-      alert(`Clase "${className}" eliminada con éxito.`);
+      toast.success(`Clase "${className}" eliminada con éxito.`);
       setSelectedClassId(null);
       fetchNotificaciones();
     } catch (err: any) {
-      alert("Error al eliminar la clase: " + err.message);
+      toast.error("Error al eliminar la clase: " + err.message);
     }
   };
 

@@ -138,9 +138,22 @@ CREATE TABLE public.reserva (
 
 CREATE TABLE public.asistencia (
     id SERIAL PRIMARY KEY,
-    id_reserva INTEGER NOT NULL REFERENCES public.reserva(id_reserva) ON DELETE CASCADE,
+    id_reserva INTEGER NOT NULL UNIQUE REFERENCES public.reserva(id_reserva) ON DELETE CASCADE,
     asistio BOOLEAN DEFAULT false,
+    fecha_hora_ingreso TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    metodo_ingreso TEXT DEFAULT 'QR',
+    token_qr_usado TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.notificaciones (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    tipo TEXT NOT NULL DEFAULT 'informativa',
+    titulo TEXT NOT NULL,
+    mensaje TEXT NOT NULL,
+    leida BOOLEAN DEFAULT false,
+    clase_id INTEGER REFERENCES public.clase(id_clase) ON DELETE CASCADE,
+    creado_en TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 
@@ -149,7 +162,7 @@ CREATE TABLE public.asistencia (
 -- ==========================================
 
 -- Whitelist
-INSERT INTO public.roles_whitelist (correo, rol_asignado, codigo_invitacion) VALUES 
+INSERT INTO public.roles_whitelist (correo, rol_asignado, codigo_invitacion) VALUES
 ('admin@demo.com', 'administrador', '111111'),
 ('profesor@demo.com', 'profesor', '222222'),
 ('profe2@demo.com', 'profesor', '222223'),
@@ -166,7 +179,7 @@ VALUES
 ('c0000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'alumno@demo.com', crypt('123456', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{"invite_code":"333333"}', now(), now());
 
 -- Perfiles
-INSERT INTO public.profiles (id, name, last_name, correo, role, rut, phone, especialidad, condicion_medica, contacto_emergencia) VALUES 
+INSERT INTO public.profiles (id, name, last_name, correo, role, rut, phone, especialidad, condicion_medica, contacto_emergencia) VALUES
 ('a0000000-0000-0000-0000-000000000001', 'Coordinación', 'Admin', 'admin@demo.com', 'administrador', NULL, NULL, NULL, NULL, NULL),
 ('b0000000-0000-0000-0000-000000000002', 'Fernanda', 'Pánico', 'profesor@demo.com', 'profesor', '11111111-1', '+56911112222', 'Pole Dance y Exotic', NULL, NULL),
 ('b0000000-0000-0000-0000-000000000003', 'Valentina', 'Flex', 'profe2@demo.com', 'profesor', '33333333-3', '+56933334444', 'Flexibilidad', NULL, NULL),
@@ -174,11 +187,11 @@ INSERT INTO public.profiles (id, name, last_name, correo, role, rut, phone, espe
 ('c0000000-0000-0000-0000-000000000003', 'María', 'Estudiante', 'alumno@demo.com', 'alumno', '22222222-2', '+56988887777', NULL, 'Alergia a penicilina', 'Mamá: +569 9999 8888');
 
 -- Salas y Disciplinas
-INSERT INTO public.salas (id, nombre) VALUES 
+INSERT INTO public.salas (id, nombre) VALUES
 ('11111111-0000-0000-0000-000000000001', 'Sala A (Principal)'),
 ('11111111-0000-0000-0000-000000000002', 'Sala B (Espejos)');
 
-INSERT INTO public.tipos_clase (id, nombre, icono) VALUES 
+INSERT INTO public.tipos_clase (id, nombre, icono) VALUES
 ('22222222-0000-0000-0000-000000000001', 'Pole Dance', 'accessibility_new'),
 ('22222222-0000-0000-0000-000000000002', 'Pole Exotic', 'star'),
 ('22222222-0000-0000-0000-000000000003', 'Flex', 'self_improvement');

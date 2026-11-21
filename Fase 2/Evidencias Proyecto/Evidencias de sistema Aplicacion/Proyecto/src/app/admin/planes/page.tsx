@@ -1,7 +1,9 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+import toast from "react-hot-toast";
+import { exportAlumnosYPagosToExcel } from "@/lib/exportExcel";
 
 export default function AdminPlanesPage() {
   const [planes, setPlanes] = useState<any[]>([]);
@@ -67,7 +69,7 @@ export default function AdminPlanesPage() {
 
       if (error) throw error;
 
-      showToast("Plan creado exitosamente");
+      toast.success("Plan creado exitosamente");
       setIsModalOpen(false);
       setFormData({
         nombre_plan: "",
@@ -82,7 +84,7 @@ export default function AdminPlanesPage() {
       fetchPlanes();
     } catch (error) {
       console.error("Error al crear plan:", error);
-      alert("Error al guardar el plan. ¿Creaste la tabla en Supabase?");
+      toast.error("Error al guardar el plan. Verifica que la tabla exista en Supabase.");
     }
   };
 
@@ -101,13 +103,33 @@ export default function AdminPlanesPage() {
     <div className="flex flex-col w-full pb-10 min-h-screen bg-surface">
       <header className="pt-3 pb-4 px-5 flex items-center justify-between gap-3 sticky top-0 z-10 glass-panel border-x-0 border-t-0 rounded-none border-b border-surface-container shadow-sm">
         <h1 className="font-headline-md text-headline-md gradient-text font-bold">Planes y Tienda</h1>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="h-10 px-4 rounded-xl bg-primary text-on-primary font-label-md text-label-md font-bold flex items-center justify-center gap-2 shadow-sm"
-        >
-          <span className="material-symbols-outlined text-[20px]">add</span>
-          Crear Plan
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={async () => {
+              if (!supabase) return;
+              try {
+                const count = await exportAlumnosYPagosToExcel(supabase);
+                toast.success(`Reporte de alumnos y planes descargado (${count} alumnos).`);
+              } catch (err) {
+                console.error(err);
+                toast.error("Error al exportar reporte Excel");
+              }
+            }}
+            title="Descargar lista de alumnos y sus planes en Excel"
+            className="h-10 px-3.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 font-label-md text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
+          >
+            <span className="material-symbols-outlined text-[18px]">download</span>
+            Excel Clientes
+          </button>
+          <button 
+            onClick={() => setIsModalOpen(true)}
+            className="h-10 px-4 rounded-xl bg-primary text-on-primary font-label-md text-label-md font-bold flex items-center justify-center gap-2 shadow-sm"
+          >
+            <span className="material-symbols-outlined text-[20px]">add</span>
+            Crear Plan
+          </button>
+        </div>
       </header>
 
       <div className="px-margin-mobile pt-space-md">
