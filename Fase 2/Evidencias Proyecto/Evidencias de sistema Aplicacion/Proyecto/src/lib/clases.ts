@@ -45,6 +45,7 @@ export async function deleteClassesCascade(
               .select('id, creditos_restantes')
               .eq('user_id', res.id_usuario)
               .eq('estado', 'activa')
+              .gt('fecha_fin', new Date().toISOString())
               .order('created_at', { ascending: false })
               .limit(1)
               .maybeSingle();
@@ -53,7 +54,9 @@ export async function deleteClassesCascade(
               await supabase
                 .from('user_suscripciones')
                 .update({ creditos_restantes: (sub.creditos_restantes || 0) + 1 })
-                .eq('id', sub.id);
+                .eq('id', sub.id)
+                .eq('estado', 'activa')
+                .gt('fecha_fin', new Date().toISOString());
             }
           } catch (refundErr) {
             console.warn("Error al reembolsar crédito a usuario:", res.id_usuario, refundErr);

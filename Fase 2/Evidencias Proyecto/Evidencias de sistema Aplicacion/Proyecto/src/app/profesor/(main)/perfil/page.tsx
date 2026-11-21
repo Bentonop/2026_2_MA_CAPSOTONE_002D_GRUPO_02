@@ -2,17 +2,21 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { identidadDocente, nombreDocenteRegistrado } from "@/lib/identidadDocente";
 import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
 
 export default function PerfilProfesorPage() {
   const [profile, setProfile] = useState<any>(null);
   const [clases, setClases] = useState<any[]>([]);
+  const [monthlyClassCount, setMonthlyClassCount] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState({
+    name: "",
+    last_name: "",
     bio: "",
     especialidad: ""
   });
@@ -35,11 +39,26 @@ export default function PerfilProfesorPage() {
         .single();
         
       if (user) {
-        setProfile(user);
+        const docente = { ...user, correo: user.correo || authUser.email };
+        setProfile(docente);
         setFormData({
+          name: nombreDocenteRegistrado(docente),
+          last_name: docente.last_name ?? "",
           bio: user.bio || "",
           especialidad: user.especialidad || ""
         });
+
+        const now = new Date();
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        const { count, error: countError } = await supabase
+          .from("clase")
+          .select("id_clase", { count: "exact", head: true })
+          .eq("id_profesor", user.id)
+          .neq("estado_clase", "cancelada")
+          .gte("fecha_hora_inicio", monthStart.toISOString())
+          .lt("fecha_hora_inicio", nextMonth.toISOString());
+        if (!countError) setMonthlyClassCount(count);
 
         // Fetch their classes
         const { data: susClases } = await supabase
@@ -60,18 +79,20 @@ export default function PerfilProfesorPage() {
 
   const handleSave = async () => {
     if (!profile) return;
+    const updates = { ...formData, name: formData.name.trim(), last_name: formData.last_name.trim() };
+    if (!nombreDocenteRegistrado({ ...updates, correo: profile.correo }) || !updates.last_name) {
+      toast.error("Ingresa tu nombre y apellido.");
+      return;
+    }
     setIsSaving(true);
     try {
       const { error } = await supabase!
         .from("profiles")
-        .update({
-          bio: formData.bio,
-          especialidad: formData.especialidad
-        })
+        .update(updates)
         .eq("id", profile.id);
         
       if (error) throw error;
-      setProfile({ ...profile, ...formData });
+      setProfile({ ...profile, ...updates });
       setIsEditing(false);
       toast.success("Perfil docente actualizado con éxito");
     } catch (err) {
@@ -87,11 +108,20 @@ export default function PerfilProfesorPage() {
     window.location.href = "/";
   };
 
+  const [eliminandoCuenta, setEliminandoCuenta] = useState(false);
+
   const handleDeleteAccount = async () => {
-    if (window.confirm("¿Estás segura de que quieres eliminar tu cuenta permanentemente? Perderás todas tus clases y alumnos asignados.")) {
-      toast.success("Tu cuenta ha sido eliminada del sistema.");
-      await supabase.auth.signOut();
-      window.location.href = "/";
+    if (eliminandoCuenta || !window.confirm("¿Eliminar tu cuenta? Se eliminarán tu perfil y tus datos operativos. Los respaldos contables se conservan con acceso restringido. Esta acción es irreversible.")) return;
+    setEliminandoCuenta(true);
+    try {
+      const { error } = await supabase.rpc("eliminar_mi_cuenta");
+      if (error) throw error;
+      await supabase.auth.signOut({ scope: "local" });
+      window.location.replace("/");
+    } catch (error) {
+      console.error("No se pudo eliminar la cuenta:", error);
+      toast.error("No se pudo eliminar tu cuenta. Contacta a administración si el problema continúa.");
+      setEliminandoCuenta(false);
     }
   };
 
@@ -115,6 +145,8 @@ export default function PerfilProfesorPage() {
       </div>
     );
   }
+
+  const identidad = identidadDocente(profile);
 
   return (
     <div className="flex-1 flex flex-col w-full min-h-screen bg-background animate-in fade-in duration-500 pb-20">
@@ -151,7 +183,7 @@ export default function PerfilProfesorPage() {
              <div className="flex flex-col sm:flex-row sm:items-end gap-5">
                 <div className="relative">
                   <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-3xl bg-gradient-to-tr from-primary to-tertiary flex items-center justify-center text-on-primary text-5xl font-bold shadow-lg shadow-primary/30 border-4 border-background ring-4 ring-primary/10 rotate-3 transition-transform hover:rotate-0 duration-300">
-                     <span className="-rotate-3 inline-block">{profile.name?.charAt(0)}{profile.last_name?.charAt(0) || ""}</span>
+                     <span className="-rotate-3 inline-block">{identidad.iniciales}</span>
                   </div>
                   <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-emerald-500 rounded-full border-4 border-background flex items-center justify-center shadow-sm">
                      <span className="material-symbols-outlined text-white text-[14px] font-bold">check</span>
@@ -160,7 +192,7 @@ export default function PerfilProfesorPage() {
                 
                 <div className="flex-1 flex flex-col gap-1 pb-2">
                    <h1 className="font-display-sm text-on-surface font-bold tracking-tight">
-                     {profile.name} {profile.last_name}
+                     {identidad.nombre}
                    </h1>
                    <div className="flex items-center gap-2 text-primary font-label-lg font-semibold">
                       <span className="material-symbols-outlined text-[18px]">verified</span>
@@ -180,6 +212,21 @@ export default function PerfilProfesorPage() {
              {isEditing && (
                 <div className="mt-6 pt-6 border-t border-surface-container-high animate-in slide-in-from-top-4 fade-in duration-300 flex flex-col gap-5">
                   
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="flex flex-col gap-1 font-label-sm text-primary font-bold">
+                      Nombre
+                      <input autoComplete="given-name" value={formData.name}
+                        onChange={e => setFormData({ ...formData, name: e.target.value })}
+                        className="w-full rounded-xl border border-surface-container-highest bg-background p-4 text-on-surface" />
+                    </label>
+                    <label className="flex flex-col gap-1 font-label-sm text-primary font-bold">
+                      Apellido
+                      <input autoComplete="family-name" value={formData.last_name}
+                        onChange={e => setFormData({ ...formData, last_name: e.target.value })}
+                        className="w-full rounded-xl border border-surface-container-highest bg-background p-4 text-on-surface" />
+                    </label>
+                  </div>
+
                   <div className="flex flex-col gap-1.5">
                     <label className="font-label-sm text-primary font-bold ml-1">Tu Especialidad</label>
                     <input
@@ -206,7 +253,7 @@ export default function PerfilProfesorPage() {
                     <button 
                       onClick={() => {
                         setIsEditing(false);
-                        setFormData({ bio: profile.bio || "", especialidad: profile.especialidad || "" });
+                        setFormData({ name: nombreDocenteRegistrado(profile), last_name: profile.last_name ?? "", bio: profile.bio || "", especialidad: profile.especialidad || "" });
                       }}
                       className="px-6 py-3 rounded-xl text-secondary font-label-lg font-bold hover:bg-surface-container transition-colors"
                     >
@@ -235,8 +282,8 @@ export default function PerfilProfesorPage() {
                 <div className="w-12 h-12 rounded-full bg-secondary-container text-secondary flex items-center justify-center mb-1 group-hover:scale-110 transition-transform">
                    <span className="material-symbols-outlined text-[24px]">local_fire_department</span>
                 </div>
-                <span className="font-display-md text-on-surface font-bold">{clases.length > 0 ? clases.length * 4 : '12'}</span>
-                <span className="font-label-sm text-on-surface-variant uppercase tracking-wider">Clases este mes</span>
+                <span className="font-display-md text-on-surface font-bold">{monthlyClassCount ?? "—"}</span>
+                <span className="font-label-sm text-on-surface-variant uppercase tracking-wider">Clases asignadas este mes</span>
              </div>
           </div>
 
@@ -289,14 +336,16 @@ export default function PerfilProfesorPage() {
             </button>
             <button 
               onClick={handleDeleteAccount}
-              className="w-full h-12 rounded-xl bg-error/10 text-error font-label-lg font-bold flex items-center justify-center gap-2 hover:bg-error/20 transition-colors"
+              disabled={eliminandoCuenta}
+              className="w-full h-12 rounded-xl bg-error text-on-error font-label-lg font-bold flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-50 transition-colors"
             >
               <span className="material-symbols-outlined text-[20px]">delete_forever</span>
-              Borrar Cuenta
+              {eliminandoCuenta ? "Eliminando…" : "Borrar cuenta"}
             </button>
             <button 
               onClick={handleLogout}
-              className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl bg-error/10 text-error hover:bg-error/20 active:scale-[0.98] transition-all font-label-lg font-bold"
+              disabled={eliminandoCuenta}
+              className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl bg-surface-container-high text-on-surface hover:bg-surface-container-highest active:scale-[0.98] transition-all font-label-lg font-bold"
             >
               <span className="material-symbols-outlined text-[20px]">logout</span>
               Cerrar Sesión

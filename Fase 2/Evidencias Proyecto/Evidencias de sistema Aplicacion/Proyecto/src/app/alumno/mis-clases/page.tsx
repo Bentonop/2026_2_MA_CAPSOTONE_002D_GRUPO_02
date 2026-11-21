@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { crearPaseAlumno } from "@/lib/paseAlumno";
 import { QRCodeSVG } from "qrcode.react";
 import toast from "react-hot-toast";
 
@@ -28,11 +29,6 @@ export default function MisClasesPage() {
     }
 
     if (!targetUserId) {
-      const { data: user } = await supabase.from("profiles").select("id").eq("role", "alumno").order("created_at", { ascending: true }).limit(1).maybeSingle();
-      targetUserId = user?.id || null;
-    }
-
-    if (!targetUserId) {
       setIsLoading(false);
       return;
     }
@@ -42,7 +38,8 @@ export default function MisClasesPage() {
       .select("creditos_restantes")
       .eq("user_id", targetUserId)
       .eq("estado", "activa")
-      .gt("creditos_restantes", 0);
+      .gt("creditos_restantes", 0)
+      .or(`fecha_fin.is.null,fecha_fin.gt.${new Date().toISOString()}`);
       
     if (subs) {
        const totalCredits = subs.reduce((sum, sub) => sum + sub.creditos_restantes, 0);
@@ -104,23 +101,30 @@ export default function MisClasesPage() {
         .update({ cupos_inscritos: Math.max(0, currentEnrolled - 1) })
         .eq("id_clase", reserva.clase.id_clase);
 
-      // 3. Reembolsar crédito si fue con >= 2 horas
+      let reembolsado = false;
+      // 3. Reembolsar crédito si fue con >= 2 horas y hay vigencia
       if (isEarlyCancel) {
         const { data: sub } = await supabase
           .from("user_suscripciones")
           .select("id, creditos_restantes")
           .eq("user_id", reserva.id_usuario)
           .eq("estado", "activa")
+          .gt("fecha_fin", new Date().toISOString())
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
 
         if (sub) {
-          await supabase
+          const { data: subsActualizada } = await supabase
             .from("user_suscripciones")
             .update({ creditos_restantes: (sub.creditos_restantes || 0) + 1 })
-            .eq("id", sub.id);
-          setCredits(prev => prev + 1);
+            .eq("id", sub.id)
+            .eq("estado", "activa")
+            .gt("fecha_fin", new Date().toISOString())
+            .select("estado")
+            .maybeSingle();
+          reembolsado = subsActualizada?.estado === "activa";
+          if (reembolsado) setCredits(prev => prev + 1);
         }
       }
 
@@ -128,7 +132,7 @@ export default function MisClasesPage() {
       setReservas(prev => prev.filter(r => r.id_reserva !== reserva.id_reserva));
 
       toast.success(
-        isEarlyCancel
+        reembolsado
           ? "Clase cancelada. Tu crédito ha sido reembolsado exitosamente."
           : "Clase cancelada. Cupo liberado para la academia."
       );
@@ -372,13 +376,7 @@ export default function MisClasesPage() {
 
             <div className="p-4 bg-white rounded-2xl border border-surface-container shadow-md flex justify-center items-center">
               <QRCodeSVG 
-                value={JSON.stringify({
-                  tipo: "asistencia_alumno",
-                  id_reserva: selectedReserva.id_reserva,
-                  id_clase: selectedReserva.clase.id_clase,
-                  id_usuario: selectedReserva.id_usuario,
-                  clase: selectedReserva.clase.nombre_clase
-                })} 
+                value={crearPaseAlumno(selectedReserva.id_reserva, selectedReserva.clase.id_clase)}
                 size={210} 
                 level="H" 
                 includeMargin={true} 

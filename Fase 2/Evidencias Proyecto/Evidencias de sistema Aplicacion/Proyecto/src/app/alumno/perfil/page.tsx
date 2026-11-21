@@ -1,6 +1,8 @@
-﻿"use client";
+"use client";
 
+import Link from "next/link";
 import { useState, useEffect } from "react";
+import { calcularVigenciaPlan } from "@/lib/vigenciaPlan";
 import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
 
@@ -8,13 +10,24 @@ function formatPlanDate(value: string | null, fallback: string) {
   if (!value) return fallback;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return fallback;
-  return new Intl.DateTimeFormat("es-CL", { dateStyle: "short" }).format(date);
+  return new Intl.DateTimeFormat("es-CL", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Santiago" }).format(date);
+}
+
+interface PlanAlumno {
+  id: string;
+  nombre: string;
+  estado: string;
+  inicio: string | null;
+  fin: string | null;
+  duracion: number | null;
+  creditos: number;
 }
 
 export default function AlumnoPerfilPage() {
   const [profile, setProfile] = useState<any>(null);
-  const [activePlans, setActivePlans] = useState<{ name: string; startDate: string | null; endDate: string | null }[]>([]);
-  const [planLookupFailed, setPlanLookupFailed] = useState(false);
+  const [planes, setPlanes] = useState<PlanAlumno[]>([]);
+  const [planStatus, setPlanStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [now, setNow] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   
   const [isEditing, setIsEditing] = useState(false);
@@ -51,29 +64,6 @@ export default function AlumnoPerfilPage() {
             correo: data.correo || ""
           });
 
-          const { data: subscriptions, error: subscriptionsError } = await supabase
-            .from("user_suscripciones")
-            .select("fecha_inicio, fecha_fin, planes(nombre_plan, duracion_dias)")
-            .eq("user_id", authUser.id)
-            .eq("estado", "activa");
-
-          if (subscriptionsError) {
-            console.error("Error fetching active plans:", subscriptionsError);
-            setPlanLookupFailed(true);
-          } else {
-            const planNames = (subscriptions || []).flatMap(subscription => {
-              const relation = subscription.planes;
-              const plans = Array.isArray(relation) ? relation : relation ? [relation] : [];
-              return plans
-                .filter(plan => Boolean(plan.nombre_plan))
-                .map(plan => ({
-                  name: plan.nombre_plan,
-                  startDate: subscription.fecha_inicio,
-                  endDate: subscription.fecha_fin || (plan.duracion_dias === 1 ? subscription.fecha_inicio : null)
-                }));
-            });
-            setActivePlans(planNames);
-          }
         }
       } catch (error) {
         console.error("Error fetching profile:", error);
@@ -83,6 +73,55 @@ export default function AlumnoPerfilPage() {
     }
     fetchProfile();
   }, []);
+
+  const profileId = profile?.id;
+  useEffect(() => {
+    if (!profileId) return;
+    let active = true;
+
+    async function loadPlans() {
+      const { data, error } = await supabase
+        .from("user_suscripciones")
+        .select("id, estado, fecha_inicio, fecha_fin, creditos_restantes, planes(nombre_plan, duracion_dias)")
+        .eq("user_id", profileId)
+        .order("created_at", { ascending: false });
+      if (!active) return;
+      setNow(Date.now());
+      if (error) {
+        setPlanStatus("error");
+        return;
+      }
+      setPlanes((data ?? []).map(subscription => {
+        const plan = Array.isArray(subscription.planes) ? subscription.planes[0] : subscription.planes;
+        return {
+          id: subscription.id,
+          nombre: plan?.nombre_plan ?? "Plan",
+          estado: subscription.estado,
+          inicio: subscription.fecha_inicio,
+          fin: subscription.fecha_fin,
+          duracion: plan?.duracion_dias ?? null,
+          creditos: subscription.creditos_restantes,
+        };
+      }));
+      setPlanStatus("ready");
+    }
+
+    void loadPlans();
+    window.addEventListener("focus", loadPlans);
+    const interval = window.setInterval(loadPlans, 60_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", loadPlans);
+    };
+  }, [profileId]);
+
+  const planesConVigencia = planes.map(plan => ({
+    ...plan,
+    ...calcularVigenciaPlan(plan.estado, plan.inicio, plan.fin, plan.duracion, now),
+  }));
+  const vigentes = planesConVigencia.filter(plan => plan.estado === "activa");
+  const creditosDisponibles = vigentes.reduce((total, plan) => total + plan.creditos, 0);
 
   const handleSave = async () => {
     if (!profile || !supabase) return;
@@ -111,11 +150,20 @@ export default function AlumnoPerfilPage() {
     window.location.href = "/";
   };
 
+  const [eliminandoCuenta, setEliminandoCuenta] = useState(false);
+
   const handleDeleteAccount = async () => {
-    if (window.confirm("¿Estás segura de que quieres eliminar tu cuenta permanentemente? Perderás todos tus planes y reservas.")) {
-      toast.success("Tu cuenta ha sido eliminada del sistema.");
-      await supabase.auth.signOut();
-      window.location.href = "/";
+    if (eliminandoCuenta || !window.confirm("¿Eliminar tu cuenta? Se eliminarán tu perfil y tus datos operativos. Los respaldos contables se conservan con acceso restringido. Esta acción es irreversible.")) return;
+    setEliminandoCuenta(true);
+    try {
+      const { error } = await supabase.rpc("eliminar_mi_cuenta");
+      if (error) throw error;
+      await supabase.auth.signOut({ scope: "local" });
+      window.location.replace("/");
+    } catch (error) {
+      console.error("No se pudo eliminar la cuenta:", error);
+      toast.error("No se pudo eliminar tu cuenta. Contacta a administración si el problema continúa.");
+      setEliminandoCuenta(false);
     }
   };
 
@@ -138,22 +186,39 @@ export default function AlumnoPerfilPage() {
              </div>
              <h2 className="font-headline-sm text-on-surface text-xl">{profile.name} {profile.last_name}</h2>
              <span className="font-label-md text-secondary mt-1 uppercase tracking-wider">{profile.role}</span>
-             <div className={`mt-4 max-w-full px-3 py-2 rounded-2xl border text-center font-label-sm font-bold shadow-sm ${activePlans.length > 0 ? "bg-primary/10 border-primary/25 text-primary" : "bg-error/10 border-error/20 text-error"}`}>
-               {planLookupFailed ? (
-                 "No se pudo cargar el plan"
-               ) : activePlans.length > 0 ? (
-                 <>
-                   <span className="block mb-1">Planes activos:</span>
-                   {activePlans.map((plan, index) => (
-                     <span key={`${plan.name}-${plan.startDate}-${index}`} className="block font-medium">
-                       {plan.name}: {formatPlanDate(plan.startDate, "Sin fecha")} - {formatPlanDate(plan.endDate, "Sin término")}
-                     </span>
-                   ))}
-                 </>
-               ) : (
-                 "Sin plan activo"
-               )}
-             </div>
+          </section>
+
+          <section aria-labelledby="mis-planes" className="rounded-2xl bg-surface-container-lowest border border-surface-container p-5">
+            <h3 id="mis-planes" className="font-headline-sm text-on-surface">Mis planes</h3>
+            {planStatus === "loading" ? <p role="status">Cargando planes…</p> : planStatus === "error" ? (
+              <p role="alert">No se pudieron consultar tus planes.</p>
+            ) : (
+              <>
+                <p className="mt-2 font-bold">{vigentes.length ? "Tienes un plan activo" : "Sin plan activo"}</p>
+                <p className="text-secondary">{creditosDisponibles} créditos disponibles</p>
+                {planesConVigencia.length > 0 && (
+                  <ul className="mt-4 space-y-3">
+                    {planesConVigencia.map(plan => (
+                      <li key={plan.id} className="rounded-xl border border-surface-container p-3">
+                        <p className="font-bold">{plan.nombre}</p>
+                        <p className="text-sm text-secondary">
+                          {plan.estado === "activa" ? "Activo" : plan.estado === "vencida" ? "Vencido" : plan.estado === "pendiente" ? "Pendiente de aprobación" : plan.estado === "sin_vigencia" ? "Vigencia sin confirmar" : "Cancelado"}
+                          {plan.duracion !== null && ` · ${plan.duracion} ${plan.duracion === 1 ? "día" : "días"}`}
+                        </p>
+                        {["activa", "vencida"].includes(plan.estado) && (
+                          <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+                            <dt>Activado</dt><dd>{formatPlanDate(plan.inicio, "Sin fecha registrada")}</dd>
+                            <dt>{plan.estado === "vencida" ? "Venció" : "Vence"}</dt><dd>{formatPlanDate(plan.fin, "Sin fecha registrada")}</dd>
+                            {plan.estado === "activa" && <><dt>Créditos disponibles</dt><dd>{plan.creditos}</dd></>}
+                          </dl>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {!vigentes.length && <Link href="/alumno/tienda" className="inline-block mt-4 font-bold text-primary underline">Ver planes</Link>}
+              </>
+            )}
           </section>
 
           {/* Details */}
@@ -286,14 +351,16 @@ export default function AlumnoPerfilPage() {
             </button>
             <button 
               onClick={handleDeleteAccount}
-              className="w-full h-12 rounded-xl bg-error/10 text-error font-label-lg font-bold flex items-center justify-center gap-2 hover:bg-error/20 transition-colors"
+              disabled={eliminandoCuenta}
+              className="w-full h-12 rounded-xl bg-error text-on-error font-label-lg font-bold flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-50 transition-colors"
             >
               <span className="material-symbols-outlined text-[20px]">delete_forever</span>
-              Borrar Cuenta
+              {eliminandoCuenta ? "Eliminando…" : "Borrar cuenta"}
             </button>
             <button 
               onClick={handleLogout}
-              className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl bg-error/10 text-error hover:bg-error/20 active:scale-[0.98] transition-all font-label-lg font-bold"
+              disabled={eliminandoCuenta}
+              className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl bg-surface-container-high text-on-surface hover:bg-surface-container-highest active:scale-[0.98] transition-all font-label-lg font-bold"
             >
               <span className="material-symbols-outlined text-[20px]">logout</span>
               Cerrar Sesión

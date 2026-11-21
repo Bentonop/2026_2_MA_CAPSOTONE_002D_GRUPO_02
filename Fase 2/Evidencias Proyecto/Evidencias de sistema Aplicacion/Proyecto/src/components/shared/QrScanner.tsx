@@ -1,91 +1,93 @@
 "use client";
-import { useEffect, useRef } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 
 interface QrScannerProps {
   onResult: (decodedText: string) => void;
-  onError?: (error: any) => void;
+  onError?: (error: string) => void;
   id?: string;
   isLocked?: boolean;
 }
 
-export default function QrScanner({ onResult, onError, id = "qr-reader", isLocked = false }: QrScannerProps) {
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
-  const scanLockRef = useRef<boolean>(false);
+const scannerCleanups = new Map<string, Promise<void>>();
 
-  // Sincronizar el bloqueo externo con la referencia interna
+export default function QrScanner({ onResult, onError, id = "qr-reader", isLocked = false }: QrScannerProps) {
+  const instanceId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const readerId = `${id}-${instanceId}`;
+  const callbacksRef = useRef({ onResult, onError });
+  const scanLockRef = useRef(false);
+
+  useEffect(() => {
+    callbacksRef.current = { onResult, onError };
+  }, [onResult, onError]);
+
   useEffect(() => {
     scanLockRef.current = isLocked;
   }, [isLocked]);
 
   useEffect(() => {
-    // Evitar inicialización duplicada
-    if (!scannerRef.current) {
-      scannerRef.current = new Html5QrcodeScanner(
-        id,
-        { 
-          fps: 10, 
-          qrbox: { width: 250, height: 250 },
-          aspectRatio: 1.0,
-          showTorchButtonIfSupported: true,
-        },
-        false
-      );
+    let disposed = false;
+    let scanner: Html5QrcodeScanner | undefined;
 
-      scannerRef.current.render(
+    const ready = (scannerCleanups.get(id) ?? Promise.resolve()).then(() => {
+      if (disposed) return;
+      scanner = new Html5QrcodeScanner(readerId, {
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
+        aspectRatio: 1.0,
+        showTorchButtonIfSupported: true,
+      }, false);
+
+      scanner.render(
         (decodedText) => {
-          // Bloqueo estricto anti-saturación: si ya se detectó un código, ignorar cuadros posteriores
-          if (scanLockRef.current) {
-            return;
-          }
+          if (disposed || scanLockRef.current) return;
           scanLockRef.current = true;
-          onResult(decodedText);
+          callbacksRef.current.onResult(decodedText);
         },
-        (errorMessage) => {
-          if (onError) onError(errorMessage);
+        (message) => {
+          if (!disposed) callbacksRef.current.onError?.(message);
         }
       );
-    }
+    }).catch((error: unknown) => {
+      console.error("No se pudo iniciar el escáner:", error);
+    });
 
     return () => {
-      if (scannerRef.current) {
-        try {
-          scannerRef.current.clear().catch(e => {
-            // Ignorar errores benignos de desmonte rápido
-            console.debug("Info clearing scanner:", e);
-          });
-        } catch (e) {
-          console.debug("Catch on scanner cleanup:", e);
-        }
-        scannerRef.current = null;
-      }
+      disposed = true;
+      const cleanup = ready.then(async () => {
+        await scanner?.clear();
+      }).catch((error: unknown) => {
+        console.debug("No se pudo limpiar el escáner:", error);
+      }).finally(() => {
+        if (scannerCleanups.get(id) === cleanup) scannerCleanups.delete(id);
+      });
+      scannerCleanups.set(id, cleanup);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, readerId]);
 
   return (
     <div className="w-full relative bg-black rounded-2xl overflow-hidden shadow-inner border border-surface-container-highest">
       <style>{`
-        #${id} {
+        #${readerId} {
           width: 100%;
           border: none !important;
         }
-        #${id}__scan_region {
+        #${readerId}__scan_region {
           min-height: 200px;
         }
-        #${id}__scan_region video {
+        #${readerId}__scan_region video {
           object-fit: cover !important;
           border-radius: 12px;
         }
-        #${id}__dashboard {
+        #${readerId}__dashboard {
           padding: 10px;
           background: #1E201D;
           color: white;
         }
-        #${id}__dashboard a {
+        #${readerId}__dashboard a {
           color: #D4A72C;
         }
-        #${id}__dashboard button {
+        #${readerId}__dashboard button {
           background-color: #D4A72C;
           color: #1E201D;
           border: none;
@@ -97,7 +99,7 @@ export default function QrScanner({ onResult, onError, id = "qr-reader", isLocke
           font-size: 13px;
         }
       `}</style>
-      <div id={id}></div>
+      <div id={readerId}></div>
     </div>
   );
 }

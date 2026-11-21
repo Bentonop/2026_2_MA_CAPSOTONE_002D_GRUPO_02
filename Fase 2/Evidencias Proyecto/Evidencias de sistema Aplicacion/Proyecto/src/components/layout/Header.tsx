@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { useState, useEffect } from "react";
@@ -10,6 +10,7 @@ interface HeaderProps {
   title?: string;
   subtitle?: string;
   profileLink?: string;
+  homeLink?: string;
 }
 
 interface Notificacion {
@@ -19,7 +20,7 @@ interface Notificacion {
   mensaje: string;
   leida: boolean;
   creado_en: string;
-  clase_id: number;
+  clase_id?: number;
 }
 
 function formatRelativeTime(isoDate: string): string {
@@ -36,13 +37,15 @@ function formatRelativeTime(isoDate: string): string {
   return date.toLocaleDateString("es-CL", { day: "2-digit", month: "short" });
 }
 
-export default function Header({ title = "Cuerpo y Alma", subtitle = "Inicio", profileLink = "#" }: HeaderProps) {
+export default function Header({ title = "Cuerpo y Alma", subtitle = "Inicio", profileLink = "#", homeLink }: HeaderProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [notificaciones, setNotificaciones] = useState<Notificacion[]>([]);
   const [filter, setFilter] = useState<"todas" | "importantes" | "no_leidas">("todas");
   const [markingAll, setMarkingAll] = useState(false);
   const unreadCount = notificaciones.filter(n => !n.leida).length;
   const isAdmin = profileLink.startsWith("/admin");
+  const isStudent = profileLink.startsWith("/alumno");
+  const inbox = isStudent ? "notificaciones_alumno" : "notificaciones";
 
   // Cerrar panel con tecla Escape
   useEffect(() => {
@@ -55,47 +58,61 @@ export default function Header({ title = "Cuerpo y Alma", subtitle = "Inicio", p
   }, [isOpen]);
 
   useEffect(() => {
-    const fetchNotificaciones = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('notificaciones')
-          .select('*')
-          .order('creado_en', { ascending: false })
-          .limit(20);
+    let active = true;
 
-        if (!error && data) {
-          setNotificaciones(data);
-        }
-      } catch {
-        // Ignorar si la tabla aún no existe
+    const fetchNotificaciones = async () => {
+      if (isStudent) {
+        await supabase.rpc("registrar_avisos_vencimiento");
       }
+      const query = supabase.from(inbox).select("*");
+      const { data, error } = await (isStudent ? query.eq("descartada", false) : query)
+        .order("creado_en", { ascending: false })
+        .limit(20);
+      if (active && !error) setNotificaciones(data ?? []);
     };
 
-    fetchNotificaciones();
+    void fetchNotificaciones();
 
-    const channel = supabase.channel('schema-db-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'notificaciones',
-        },
-        (payload) => {
-          setNotificaciones((current) => [payload.new as Notificacion, ...current].slice(0, 20));
-        }
-      )
+    if (isStudent) {
+      const interval = window.setInterval(fetchNotificaciones, 60_000);
+      window.addEventListener("focus", fetchNotificaciones);
+      return () => {
+        active = false;
+        window.clearInterval(interval);
+        window.removeEventListener("focus", fetchNotificaciones);
+      };
+    }
+
+    const channel = supabase.channel("schema-db-changes")
+      .on("postgres_changes", {
+        event: "INSERT",
+        schema: "public",
+        table: "notificaciones",
+      }, () => { void fetchNotificaciones(); })
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      active = false;
+      void supabase.removeChannel(channel);
     };
-  }, []);
+  }, [inbox, isStudent, isOpen]);
+
+  const handleDismiss = async (id: string, event: React.MouseEvent) => {
+    event.stopPropagation();
+    const { error } = await supabase.from("notificaciones_alumno")
+      .update({ descartada: true }).eq("id", id);
+    if (error) {
+      toast.error("No se pudo quitar la notificación.");
+      return;
+    }
+    setNotificaciones(current => current.filter(notif => notif.id !== id));
+  };
 
   const handleMarkAsRead = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
-      await supabase.from('notificaciones').update({ leida: true }).eq('id', id);
+      const { error } = await supabase.from(inbox).update({ leida: true }).eq("id", id);
+      if (error) throw error;
       setNotificaciones(current =>
         current.map(n => n.id === id ? { ...n, leida: true } : n)
       );
@@ -111,12 +128,12 @@ export default function Header({ title = "Cuerpo y Alma", subtitle = "Inicio", p
     setMarkingAll(true);
     try {
       const { error } = await supabase
-        .from('notificaciones')
+        .from(inbox)
         .update({ leida: true })
         .in('id', unreadIds);
       if (error) throw error;
 
-      setNotificaciones(current => current.map(n => ({ ...n, leida: true })));
+      setNotificaciones(current => current.map(n => unreadIds.includes(n.id) ? { ...n, leida: true } : n));
       toast.success("Todas las notificaciones marcadas como leídas");
     } catch (err) {
       console.error(err);
@@ -155,21 +172,30 @@ export default function Header({ title = "Cuerpo y Alma", subtitle = "Inicio", p
     return true;
   }).slice(0, 6);
 
+  const brand = (
+    <>
+      <BrandLogo size="sm" showText={false} />
+      <div className="flex flex-col">
+        <span className="font-headline-sm text-headline-sm tracking-tight text-on-surface leading-none">
+          {title}
+        </span>
+        <span className="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider">
+          {subtitle}
+        </span>
+      </div>
+    </>
+  );
+
   return (
     <>
       <header className="fixed top-0 inset-x-0 z-50 bg-surface/90 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)] pt-safe">
         <div className="h-16 max-w-5xl mx-auto px-margin-mobile flex items-center justify-between w-full">
-          <div className="flex items-center gap-space-sm">
-            <BrandLogo size="sm" showText={false} />
-            <div className="flex flex-col">
-              <span className="font-headline-sm text-headline-sm tracking-tight text-on-surface leading-none">
-                {title}
-              </span>
-              <span className="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider">
-                {subtitle}
-              </span>
-            </div>
-          </div>
+          {homeLink ? (
+            <Link href={homeLink} aria-label="Ir al Dashboard"
+              className="flex items-center gap-space-sm rounded-lg focus-visible:outline-2 focus-visible:outline-primary">
+              {brand}
+            </Link>
+          ) : <div className="flex items-center gap-space-sm">{brand}</div>}
 
           <div className="flex items-center gap-space-xs relative">
             <button
@@ -286,6 +312,13 @@ export default function Header({ title = "Cuerpo y Alma", subtitle = "Inicio", p
                         <span className="material-symbols-outlined text-on-surface-variant text-[18px]">
                           {isAdmin ? 'chevron_right' : (notif.leida ? 'done_all' : 'mark_chat_read')}
                         </span>
+                        {isStudent && (
+                          <button type="button" aria-label={`Quitar notificación: ${notif.titulo}`}
+                            onClick={event => void handleDismiss(notif.id, event)}
+                            className="rounded p-1 text-secondary hover:bg-surface-container">
+                            <span className="material-symbols-outlined text-[18px]" aria-hidden="true">close</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   );

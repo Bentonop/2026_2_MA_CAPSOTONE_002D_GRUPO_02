@@ -1,15 +1,17 @@
 "use client";
 
-import { Suspense, useState, useEffect } from "react";
+import { Suspense, useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { identidadDocente, nombreDocenteRegistrado } from "@/lib/identidadDocente";
 import { supabase } from "@/lib/supabase";
 import { deleteClassesCascade } from "@/lib/clases";
+import DetalleAsistencia, { type SesionAsistencia } from "./DetalleAsistencia";
 import toast from "react-hot-toast";
 
 interface Profile {
   id: string;
-  name: string;
-  last_name: string;
+  name: string | null;
+  last_name: string | null;
   rut: string | null;
   phone: string;
   correo: string | null;
@@ -41,7 +43,11 @@ function AdminGestionContent() {
   const [selectedDay, setSelectedDay] = useState("Lun");
   const daysFilter = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
   const [scheduleData, setScheduleData] = useState<any[]>([]);
-  const [calendarSubView, setCalendarSubView] = useState<"plantillas" | "sesiones">("plantillas");
+  const [calendarSubView, setCalendarSubView] = useState<"plantillas" | "sesiones">("sesiones");
+  const [verHistorial, setVerHistorial] = useState(false);
+  const [ordenAscendente, setOrdenAscendente] = useState(false);
+  const [sesionAsistencia, setSesionAsistencia] = useState<SesionAsistencia | null>(null);
+  const consultaSesiones = useRef(0);
   const [realClasses, setRealClasses] = useState<any[]>([]);
   const [isLoadingRealClasses, setIsLoadingRealClasses] = useState(false);
   
@@ -52,6 +58,8 @@ function AdminGestionContent() {
   const [tStartTime, setTStartTime] = useState("18:00");
   const [tEndTime, setTEndTime] = useState("19:15");
   const [tDays, setTDays] = useState<string[]>([]);
+  const [tRecurrente, setTRecurrente] = useState(false);
+  const [isSavingBlock, setIsSavingBlock] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
 
   const toggleTDay = (day: string) => {
@@ -101,6 +109,18 @@ function AdminGestionContent() {
       fetchProfesores();
     }
   }, [activeTab, selectedDay]);
+
+  useEffect(() => {
+    if (activeTab !== "calendar" || calendarSubView !== "sesiones") return;
+    void fetchRealClasses();
+    const refresh = () => { void fetchRealClasses(false); };
+    const timer = window.setInterval(refresh, 60_000);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [activeTab, calendarSubView, verHistorial, ordenAscendente]);
 
   async function fetchTiposYSalas() {
     if (!supabase) return;
@@ -212,10 +232,14 @@ function AdminGestionContent() {
   const handleSaveEdit = async () => {
     if (!supabase || !selectedProf) return;
     const updates: any = {
-      name: editName,
-      last_name: editLastName,
+      name: editName.trim(),
+      last_name: editLastName.trim(),
       phone: editPhone
     };
+    if (!nombreDocenteRegistrado({ ...updates, correo: selectedProf.correo }) || !updates.last_name) {
+      toast.error("Ingresa el nombre y apellido del docente.");
+      return;
+    }
     if (editSala) updates.sala_por_defecto = editSala;
     
     const { error } = await supabase.from("profiles").update(updates).eq("id", selectedProf.id);
@@ -247,10 +271,17 @@ function AdminGestionContent() {
     fetchTiposYSalas();
   };
 
-  const handleDeleteType = async (id: string) => {
-    if (!supabase) return;
-    await supabase.from('tipos_clase').delete().eq('id', id);
-    fetchTiposYSalas();
+  const handleDeleteCatalogItem = async (tabla: "tipos_clase" | "salas", id: string, nombre: string) => {
+    const etiqueta = tabla === "tipos_clase" ? "disciplina" : "sala";
+    if (!window.confirm(`¿Eliminar la ${etiqueta} «${nombre}»? Esta acción no se puede deshacer.`)) return;
+
+    const { data, error } = await supabase.from(tabla).delete().eq("id", id).select("id").maybeSingle();
+    if (error || !data) {
+      toast.error(`No se pudo eliminar la ${etiqueta}.`);
+      return;
+    }
+    showToast(`Se eliminó la ${etiqueta} «${nombre}».`);
+    void fetchTiposYSalas();
   };
 
   const handleAddRoom = async (e: React.FormEvent) => {
@@ -263,23 +294,13 @@ function AdminGestionContent() {
     fetchTiposYSalas();
   };
 
-  const handleDeleteRoom = async (id: string) => {
-    if (!supabase) return;
-    await supabase.from('salas').delete().eq('id', id);
-    fetchTiposYSalas();
-  };
-
   // --- CALENDAR (PLANTILLAS) FUNCTIONS ---
-  function formatLocalDateTime(d: Date): string {
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  }
-
   async function fetchPlantillas() {
     if (!supabase) return;
     const { data } = await supabase
       .from('plantillas_clase')
-      .select(`id_plantilla, dia_semana, hora_inicio, hora_fin, nombre_clase, sala, profiles:id_profesor (name)`)
+      .select(`id_plantilla, dia_semana, hora_inicio, hora_fin, nombre_clase, sala, profiles:id_profesor (name, last_name, correo)`)
+      .eq("recurrencia_confirmada", true)
       .order('hora_inicio', { ascending: true });
 
     if (data) {
@@ -302,7 +323,7 @@ function AdminGestionContent() {
 
          if (!grouped[sortKey]) grouped[sortKey] = { time: timeStr, sortKey, items: [] };
          
-         let profName = Array.isArray(c.profiles) ? c.profiles[0]?.name : (c.profiles?.name || "Profesor");
+         const profName = identidadDocente(Array.isArray(c.profiles) ? c.profiles[0] : c.profiles).nombre;
          grouped[sortKey].items.push({ id: c.id_plantilla, name: c.nombre_clase, prof: profName, sala: c.sala || "Sala Principal" });
       });
       setScheduleData(Object.values(grouped).sort((a: any, b: any) => a.sortKey.localeCompare(b.sortKey)));
@@ -314,176 +335,80 @@ function AdminGestionContent() {
 
   const handleAddTemplate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!supabase) return;
-    
-    if (tDays.length === 0) {
-      toast.error("Por favor selecciona al menos un día para este bloque.");
+    if (isSavingBlock) return;
+    if (tDays.length === 0 || tEndTime <= tStartTime) {
+      toast.error("Selecciona los días y una hora de término posterior al inicio.");
       return;
     }
 
-    const daysOfWeekMap = { "Dom": 0, "Lun": 1, "Mar": 2, "Mié": 3, "Jue": 4, "Vie": 5, "Sáb": 6 };
-    
-    const inserts = tDays.map(dayStr => ({
-      dia_semana: daysOfWeekMap[dayStr as keyof typeof daysOfWeekMap],
-      hora_inicio: tStartTime + ":00",
-      hora_fin: tEndTime + ":00",
+    const bloques = tDays.map(day => ({
+      dia_semana: (daysFilter.indexOf(day) + 1) % 7,
+      hora_inicio: tStartTime,
+      hora_fin: tEndTime,
       nombre_clase: tName,
-      id_profesor: tProf || null,
+      id_profesor: tProf,
       sala: tRoom,
-      cupo_maximo: 8
+      cupo_maximo: 8,
     }));
 
-    const { error } = await supabase.from('plantillas_clase').insert(inserts);
-
-    if (error) {
-      toast.error("Error al guardar plantilla. ¿Ejecutaste el script horarios_fijos.sql en Supabase?");
-      return;
-    }
-
-    // Generar inmediatamente las sesiones reales en 'clase' para la próxima semana (7 días)
+    setIsSavingBlock(true);
     try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      const [sh, sm] = tStartTime.split(':').map(Number);
-      const [eh, em] = tEndTime.split(':').map(Number);
-      const targetDayNums = new Set(tDays.map(d => daysOfWeekMap[d as keyof typeof daysOfWeekMap]));
-
-      const futureDate = new Date(today);
-      futureDate.setDate(today.getDate() + 7);
-
-      const { data: existingClasses } = await supabase.from('clase')
-        .select('nombre_clase, fecha_hora_inicio')
-        .gte('fecha_hora_inicio', formatLocalDateTime(today))
-        .lte('fecha_hora_inicio', formatLocalDateTime(futureDate));
-
-      const existingSet = new Set((existingClasses || []).map((c: any) => `${c.nombre_clase}_${c.fecha_hora_inicio}`));
-
-      const classSessions: any[] = [];
-      for (let i = 0; i < 7; i++) {
-        const currentDate = new Date(today);
-        currentDate.setDate(today.getDate() + i);
-        if (targetDayNums.has(currentDate.getDay())) {
-          const startDate = new Date(currentDate);
-          startDate.setHours(sh || 0, sm || 0, 0, 0);
-
-          const endDate = new Date(currentDate);
-          endDate.setHours(eh || 0, em || 0, 0, 0);
-
-          const startStr = formatLocalDateTime(startDate);
-          const endStr = formatLocalDateTime(endDate);
-          const key = `${tName}_${startStr}`;
-
-          if (!existingSet.has(key)) {
-            classSessions.push({
-              nombre_clase: tName,
-              fecha_hora_inicio: startStr,
-              fecha_hora_fin: endStr,
-              id_profesor: tProf || null,
-              sala: tRoom,
-              cupo_maximo: 8,
-              cupos_inscritos: 0,
-              estado_clase: "programada"
-            });
-          }
-        }
-      }
-
-      if (classSessions.length > 0) {
-        await supabase.from('clase').insert(classSessions);
-      }
-    } catch (genErr) {
-      console.error("Error al generar sesiones para el bloque:", genErr);
+      const { data, error } = await supabase.rpc("programar_bloques", {
+        p_bloques: bloques,
+        p_recurrente: tRecurrente,
+      });
+      if (error) throw error;
+      showToast(data ? `${data} sesiones programadas.` : "Las sesiones ya estaban programadas.");
+      setIsAddingTemplate(false);
+      setTName("");
+      setCalendarSubView("sesiones");
+      void fetchPlantillas();
+      void fetchRealClasses();
+    } catch (error) {
+      console.error("Error al programar el bloque:", error);
+      toast.error("No se pudo programar el bloque. Revisa que se haya aplicado programacion_clases.sql.");
+    } finally {
+      setIsSavingBlock(false);
     }
-
-    showToast("Bloque añadido y sesiones generadas en el calendario.");
-    setIsAddingTemplate(false);
-    setTName("");
-    fetchPlantillas();
-    fetchRealClasses();
   };
 
   const handleDeleteTemplate = async (id: string, name: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!supabase) return;
+    if (!window.confirm(`¿Dejar de repetir «${name}»? Las sesiones ya programadas conservarán sus reservas.`)) return;
 
-    const confirmDelete = window.confirm(`¿Estás seguro de que deseas eliminar la clase "${name}" de los horarios de los ${selectedDay}?`);
-    if (!confirmDelete) return;
-
-    try {
-      const daysOfWeekMap = { "Dom": 0, "Lun": 1, "Mar": 2, "Mié": 3, "Jue": 4, "Vie": 5, "Sáb": 6 };
-      const targetDayNum = daysOfWeekMap[selectedDay as keyof typeof daysOfWeekMap];
-
-      // 1. Eliminar la plantilla fija
-      const { error: errTemplate } = await supabase
-        .from('plantillas_clase')
-        .delete()
-        .eq('id_plantilla', id);
-
-      if (errTemplate) throw errTemplate;
-
-      // 2. Preguntar si también desea eliminar las clases ya generadas en el calendario
-      const deleteFuture = window.confirm(
-        `¿Deseas también eliminar del calendario las clases programadas futuras de "${name}" de los días ${selectedDay}?`
-      );
-
-      if (deleteFuture) {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        // Buscar todas las sesiones futuras de esta clase
-        const { data: futureClasses } = await supabase
-          .from('clase')
-          .select('id_clase, fecha_hora_inicio')
-          .eq('nombre_clase', name)
-          .gte('fecha_hora_inicio', formatLocalDateTime(today));
-
-        if (futureClasses && futureClasses.length > 0) {
-          const matchingIds = futureClasses
-            .filter((c: any) => new Date(c.fecha_hora_inicio).getDay() === targetDayNum)
-            .map((c: any) => c.id_clase);
-
-          if (matchingIds.length > 0) {
-            await deleteClassesCascade(supabase, matchingIds);
-            showToast(`Horario y ${matchingIds.length} sesiones futuras eliminadas.`);
-          } else {
-            showToast(`Horario de "${name}" eliminado.`);
-          }
-        } else {
-          showToast(`Horario de "${name}" eliminado.`);
-        }
-      } else {
-        showToast(`Horario de "${name}" eliminado.`);
-      }
-
-      fetchPlantillas();
-      fetchRealClasses();
-    } catch (err: any) {
-      console.error(err);
-      toast.error("Error al eliminar: " + (err.message || err));
+    const { error } = await supabase.from("plantillas_clase")
+      .update({ recurrencia_confirmada: false }).eq("id_plantilla", id);
+    if (error) {
+      toast.error("No se pudo desactivar la recurrencia.");
+      return;
     }
+    showToast("Bloque recurrente desactivado.");
+    void fetchPlantillas();
   };
 
-  async function fetchRealClasses() {
+  async function fetchRealClasses(showLoading = true) {
     if (!supabase) return;
-    setIsLoadingRealClasses(true);
+    const consulta = ++consultaSesiones.current;
+    if (showLoading) setIsLoadingRealClasses(true);
     try {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      const { data, error } = await supabase
-        .from('clase')
-        .select('*, profiles:id_profesor(name, last_name)')
-        .gte('fecha_hora_inicio', formatLocalDateTime(today))
-        .order('fecha_hora_inicio', { ascending: true })
+      const query = supabase.from("clase").select("*, profiles:id_profesor(name, last_name, correo)");
+      const fecha = today.toISOString();
+      const { data, error } = await (verHistorial
+        ? query.lt("fecha_hora_fin", fecha)
+        : query.gte("fecha_hora_fin", fecha))
+        .order("fecha_hora_inicio", { ascending: ordenAscendente })
+        .order("id_clase", { ascending: ordenAscendente })
         .limit(60);
 
       if (error) throw error;
-      setRealClasses(data || []);
+      if (consulta === consultaSesiones.current) setRealClasses(data || []);
     } catch (err) {
       console.error("Error fetching real classes:", err);
     } finally {
-      setIsLoadingRealClasses(false);
+      if (consulta === consultaSesiones.current) setIsLoadingRealClasses(false);
     }
   }
 
@@ -510,82 +435,16 @@ function AdminGestionContent() {
   };
 
   const handleGenerateClasses = async () => {
-    if (!supabase) return;
-    if (!window.confirm("Esto generará las clases reales en el calendario para los próximos 7 días (1 semana) usando las plantillas actuales. Las clases que ya existen no se duplicarán. ¿Deseas continuar?")) return;
-    
+    if (isGenerating || !window.confirm("¿Programar la próxima sesión de cada bloque recurrente?")) return;
     setIsGenerating(true);
-    showToast("Generando clases para la semana, por favor espera...");
-    
     try {
-      const { data: templates, error: templatesError } = await supabase.from('plantillas_clase').select('*');
-      if (templatesError) throw templatesError;
-      if (!templates || templates.length === 0) {
-         showToast("No hay plantillas para generar.");
-         setIsGenerating(false);
-         return;
-      }
-      
-      const today = new Date();
-      today.setHours(0,0,0,0);
-      
-      const futureDate = new Date(today);
-      futureDate.setDate(today.getDate() + 7);
-      
-      const { data: existingClasses } = await supabase.from('clase')
-          .select('nombre_clase, fecha_hora_inicio')
-          .gte('fecha_hora_inicio', formatLocalDateTime(today))
-          .lte('fecha_hora_inicio', formatLocalDateTime(futureDate));
-          
-      const existingSet = new Set((existingClasses || []).map(c => `${c.nombre_clase}_${c.fecha_hora_inicio}`));
-      
-      const inserts: any[] = [];
-      
-      for (let i = 0; i < 7; i++) {
-         const currentDate = new Date(today);
-         currentDate.setDate(today.getDate() + i);
-         const currentDayNum = currentDate.getDay(); 
-         
-         const matchingTemplates = templates.filter(t => t.dia_semana === currentDayNum);
-         
-         matchingTemplates.forEach(t => {
-            const startDate = new Date(currentDate);
-            const [sh, sm] = t.hora_inicio.split(':');
-            startDate.setHours(parseInt(sh), parseInt(sm), 0, 0);
-            
-            const endDate = new Date(currentDate);
-            const [eh, em] = t.hora_fin.split(':');
-            endDate.setHours(parseInt(eh), parseInt(em), 0, 0);
-            
-            const startStr = formatLocalDateTime(startDate);
-            const endStr = formatLocalDateTime(endDate);
-            const key = `${t.nombre_clase}_${startStr}`;
-            
-            if (!existingSet.has(key)) {
-                inserts.push({
-                   nombre_clase: t.nombre_clase,
-                   fecha_hora_inicio: startStr,
-                   fecha_hora_fin: endStr,
-                   id_profesor: t.id_profesor,
-                   sala: t.sala,
-                   cupo_maximo: t.cupo_maximo,
-                   cupos_inscritos: 0,
-                   estado_clase: "programada"
-                });
-            }
-         });
-      }
-      
-      if (inserts.length > 0) {
-        const { error: insertError } = await supabase.from('clase').insert(inserts);
-        if (insertError) throw insertError;
-        showToast(`¡Éxito! Se generaron ${inserts.length} nuevas clases para la semana.`);
-      } else {
-        showToast(`Todo al día. No hubo clases nuevas que generar para esta semana.`);
-      }
-      fetchRealClasses();
-    } catch (err: any) {
-      console.error(err);
-      toast.error("Error al generar las clases: " + err.message);
+      const { data, error } = await supabase.rpc("programar_bloques");
+      if (error) throw error;
+      showToast(data ? `${data} sesiones programadas.` : "No hay sesiones recurrentes nuevas para programar.");
+      void fetchRealClasses();
+    } catch (error) {
+      console.error("Error al repetir bloques:", error);
+      toast.error("No se pudieron repetir los bloques.");
     } finally {
       setIsGenerating(false);
     }
@@ -619,6 +478,7 @@ function AdminGestionContent() {
               <button 
                 onClick={() => {
                   setTDays([selectedDay]);
+                  setTRecurrente(false);
                   setIsAddingTemplate(true);
                 }}
                 className="px-3 h-10 rounded-full premium-btn flex items-center gap-1 shadow-sm active:scale-95 transition-transform font-bold text-sm"
@@ -680,13 +540,13 @@ function AdminGestionContent() {
             <p className="text-center text-on-surface-variant my-10">No hay profesores en el equipo.</p>
           ) : (
             profesores.map(prof => (
-              <article key={prof.id} onClick={() => { setSelectedProf(prof); setEditName(prof.name||""); setEditLastName(prof.last_name||""); setEditPhone(prof.phone||""); setEditSala(prof.sala_por_defecto||""); }} className="p-4 rounded-2xl premium-card p-4 flex items-center justify-between cursor-pointer">
+              <article key={prof.id} onClick={() => { setSelectedProf(prof); setEditName(nombreDocenteRegistrado(prof)); setEditLastName(prof.last_name||""); setEditPhone(prof.phone||""); setEditSala(prof.sala_por_defecto||""); }} className="p-4 rounded-2xl premium-card p-4 flex items-center justify-between cursor-pointer">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-full bg-primary text-on-primary flex items-center justify-center font-bold text-xl">
-                    {prof.name ? prof.name.charAt(0) : 'P'}
+                    {identidadDocente(prof).iniciales}
                   </div>
                   <div className="flex flex-col">
-                    <h3 className="font-label-lg font-bold text-on-surface">{prof.name} {prof.last_name}</h3>
+                    <h3 className="font-label-lg font-bold text-on-surface">{identidadDocente(prof).nombre}</h3>
                     <span className="font-body-sm text-secondary">{prof.sala_por_defecto || "Sin sala fija"}</span>
                   </div>
                 </div>
@@ -716,13 +576,12 @@ function AdminGestionContent() {
                   : "text-on-surface-variant hover:text-on-surface"
               }`}
             >
-              Horario Semanal
+              Bloques recurrentes
             </button>
             <button
               type="button"
               onClick={() => {
                 setCalendarSubView("sesiones");
-                fetchRealClasses();
               }}
               className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all ${
                 calendarSubView === "sesiones"
@@ -730,7 +589,7 @@ function AdminGestionContent() {
                   : "text-on-surface-variant hover:text-on-surface"
               }`}
             >
-              Sesiones Calendario
+              Sesiones próximas
             </button>
           </div>
 
@@ -748,8 +607,8 @@ function AdminGestionContent() {
                 {scheduleData.length === 0 ? (
                    <div className="text-center bg-surface-container-lowest rounded-2xl border border-surface-container py-10 mt-2">
                      <span className="material-symbols-outlined text-[40px] text-surface-variant mb-2">calendar_today</span>
-                     <p className="text-on-surface font-bold">Sin bloques fijos</p>
-                     <p className="text-secondary text-sm mt-1">Añade plantillas para el {selectedDay}.</p>
+                     <p className="text-on-surface font-bold">Sin bloques recurrentes</p>
+                     <p className="text-secondary text-sm mt-1">Activa la recurrencia al crear un bloque para el {selectedDay}.</p>
                    </div>
                 ) : (
                   scheduleData.map((slot, idx) => (
@@ -767,7 +626,7 @@ function AdminGestionContent() {
                               <button 
                                 type="button"
                                 onClick={(e) => handleDeleteTemplate(c.id, c.name, e)} 
-                                title={`Eliminar clase ${c.name}`}
+                                title={`Dejar de repetir ${c.name}`}
                                 className="w-7 h-7 rounded-full bg-error/10 hover:bg-error/20 active:bg-error text-error active:text-white flex items-center justify-center transition-colors shrink-0 -mt-0.5 -mr-0.5"
                               >
                                 <span className="material-symbols-outlined text-[16px]">delete</span>
@@ -789,8 +648,23 @@ function AdminGestionContent() {
               </div>
             </>
           ) : (
-            /* SESIONES REALES EN CALENDARIO */
             <div className="flex flex-col gap-3 pb-6">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <button type="button" onClick={() => setVerHistorial(prev => !prev)} aria-pressed={verHistorial}
+                  className="rounded-lg bg-surface-container px-3 py-2 text-xs font-bold">
+                  {verHistorial ? "Volver a próximas" : "Ver historial"}
+                </button>
+                <label className="flex items-center gap-2 text-xs font-bold">
+                  Orden
+                  <select value={ordenAscendente ? "antiguas" : "recientes"}
+                    onChange={event => setOrdenAscendente(event.target.value === "antiguas")}
+                    className="rounded-lg bg-surface-container px-3 py-2 text-xs text-on-surface">
+                    <option value="recientes">Más recientes primero</option>
+                    <option value="antiguas">Más antiguas primero</option>
+                  </select>
+                </label>
+              </div>
+              {verHistorial && <h2 className="font-headline-sm font-bold">Historial de sesiones</h2>}
               {isLoadingRealClasses ? (
                 <div className="flex justify-center p-10">
                   <span className="material-symbols-outlined animate-spin text-secondary text-3xl">refresh</span>
@@ -798,8 +672,8 @@ function AdminGestionContent() {
               ) : realClasses.length === 0 ? (
                 <div className="text-center bg-surface-container-lowest rounded-2xl border border-surface-container py-10 mt-2">
                   <span className="material-symbols-outlined text-[40px] text-surface-variant mb-2">event_busy</span>
-                  <p className="text-on-surface font-bold">No hay sesiones programadas</p>
-                  <p className="text-secondary text-sm mt-1">Usa el botón "Repetir" en Horario Semanal para generar las clases de la semana.</p>
+                  <p className="text-on-surface font-bold">{verHistorial ? "No hay sesiones en el historial" : "No hay sesiones programadas"}</p>
+                  {!verHistorial && <p className="text-secondary text-sm mt-1">Crea un bloque o usa «Repetir» para programar los bloques recurrentes.</p>}
                 </div>
               ) : (
                 realClasses.map((cls) => {
@@ -807,7 +681,7 @@ function AdminGestionContent() {
                   const endDate = new Date(cls.fecha_hora_fin);
                   const dateStr = startDate.toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' });
                   const timeRange = `${startDate.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })} - ${endDate.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}`;
-                  const profName = cls.profiles ? `${cls.profiles.name} ${cls.profiles.last_name || ''}`.trim() : 'Sin profesor';
+                  const profName = cls.profiles ? identidadDocente(cls.profiles).nombre : "Sin profesor";
 
                   return (
                     <article key={cls.id_clase} className="p-4 rounded-2xl premium-card flex flex-col gap-2">
@@ -829,7 +703,7 @@ function AdminGestionContent() {
                         </span>
                       </div>
 
-                      <div className="flex items-center justify-between text-xs text-on-surface-variant pt-2 border-t border-surface-container">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-on-surface-variant pt-2 border-t border-surface-container">
                         <div className="flex items-center gap-3">
                           <span className="flex items-center gap-1">
                             <span className="material-symbols-outlined text-[16px] text-secondary">meeting_room</span>
@@ -844,6 +718,12 @@ function AdminGestionContent() {
                             {cls.cupos_inscritos || 0} / {cls.cupo_maximo || 8}
                           </span>
                         </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button type="button" onClick={() => setSesionAsistencia(cls)}
+                            className="rounded-lg bg-surface-container px-2.5 py-1 text-xs font-bold text-on-surface">
+                            Ver asistencia
+                          </button>
+                          {!verHistorial && (
                         <button
                           type="button"
                           onClick={() => handleDeleteRealClass(cls.id_clase, cls.nombre_clase, cls.fecha_hora_inicio)}
@@ -853,6 +733,8 @@ function AdminGestionContent() {
                           <span className="material-symbols-outlined text-[14px]">delete</span>
                           Eliminar
                         </button>
+                          )}
+                        </div>
                       </div>
                     </article>
                   );
@@ -861,6 +743,10 @@ function AdminGestionContent() {
             </div>
           )}
         </section>
+      )}
+
+      {sesionAsistencia && (
+        <DetalleAsistencia key={sesionAsistencia.id_clase} sesion={sesionAsistencia} onClose={() => setSesionAsistencia(null)} />
       )}
 
       {/* TYPES TAB */}
@@ -877,7 +763,7 @@ function AdminGestionContent() {
             {classTypes.map((type) => (
               <article key={type.id} className="flex items-center justify-between premium-card rounded-xl p-4">
                 <span className="font-body-md text-on-surface font-semibold">{type.nombre}</span>
-                <button onClick={() => handleDeleteType(type.id)} className="w-8 h-8 rounded-full bg-error/10 text-error flex items-center justify-center"><span className="material-symbols-outlined text-[18px]">delete</span></button>
+                <button type="button" aria-label={`Eliminar disciplina ${type.nombre}`} onClick={() => handleDeleteCatalogItem("tipos_clase", type.id, type.nombre)} className="w-8 h-8 rounded-full bg-error/10 text-error flex items-center justify-center"><span className="material-symbols-outlined text-[18px]">delete</span></button>
               </article>
             ))}
           </div>
@@ -901,7 +787,7 @@ function AdminGestionContent() {
               salas.map((sala) => (
                 <article key={sala.id} className="flex items-center justify-between premium-card rounded-xl p-4">
                   <span className="font-body-md text-on-surface font-semibold">{sala.nombre}</span>
-                  <button onClick={() => handleDeleteRoom(sala.id)} className="w-8 h-8 rounded-full bg-error/10 text-error flex items-center justify-center"><span className="material-symbols-outlined text-[18px]">delete</span></button>
+                  <button type="button" aria-label={`Eliminar sala ${sala.nombre}`} onClick={() => handleDeleteCatalogItem("salas", sala.id, sala.nombre)} className="w-8 h-8 rounded-full bg-error/10 text-error flex items-center justify-center"><span className="material-symbols-outlined text-[18px]">delete</span></button>
                 </article>
               ))
             )}
@@ -914,7 +800,7 @@ function AdminGestionContent() {
         <div className="fixed inset-0 z-[60] bg-black/60 flex flex-col justify-end">
           <div className="glass-panel w-full rounded-t-3xl rounded-b-none border-b-0 p-6 pb-safe flex flex-col gap-4 animate-in slide-in-from-bottom">
             <div className="flex justify-between items-center mb-2">
-              <h3 className="font-headline-md font-bold text-on-surface">Nuevo Bloque Múltiple</h3>
+              <h3 className="font-headline-md font-bold text-on-surface">Programar clases</h3>
               <button onClick={() => setIsAddingTemplate(false)} className="w-8 h-8 flex items-center justify-center bg-surface-container rounded-full">
                 <span className="material-symbols-outlined text-[20px]">close</span>
               </button>
@@ -951,7 +837,7 @@ function AdminGestionContent() {
                 <select required value={tProf} onChange={e => setTProf(e.target.value)} className="w-full h-12 bg-surface-container-low rounded-xl px-4 text-on-surface focus:outline-none appearance-none">
                   <option value="">Selecciona profesor...</option>
                   {profesores.map(p => (
-                    <option key={p.id} value={p.id}>{p.name} {p.last_name}</option>
+                    <option key={p.id} value={p.id}>{identidadDocente(p).nombre}</option>
                   ))}
                 </select>
               </div>
@@ -972,13 +858,17 @@ function AdminGestionContent() {
                   <input required type="time" value={tStartTime} onChange={e => setTStartTime(e.target.value)} className="w-full h-12 bg-surface-container-low rounded-xl px-4 text-on-surface focus:outline-none" />
                 </div>
                 <div className="flex-1">
-                  <label className="text-xs font-bold text-secondary mb-1 block">Fin (1h 15m)</label>
+                  <label className="text-xs font-bold text-secondary mb-1 block">Fin</label>
                   <input required type="time" value={tEndTime} onChange={e => setTEndTime(e.target.value)} className="w-full h-12 bg-surface-container-low rounded-xl px-4 text-on-surface focus:outline-none" />
                 </div>
               </div>
 
-              <button type="submit" className="w-full h-12 premium-btn font-bold rounded-xl mt-4 shadow-md">
-                Crear Bloque Fijo
+              <label className="flex items-start gap-3 text-sm">
+                <input type="checkbox" checked={tRecurrente} onChange={e => setTRecurrente(e.target.checked)} />
+                <span>Guardar como bloque recurrente para usarlo con «Repetir».</span>
+              </label>
+              <button type="submit" disabled={isSavingBlock} className="w-full h-12 premium-btn font-bold rounded-xl mt-4 shadow-md disabled:opacity-50">
+                {isSavingBlock ? "Programando…" : "Programar sesiones"}
               </button>
             </form>
           </div>

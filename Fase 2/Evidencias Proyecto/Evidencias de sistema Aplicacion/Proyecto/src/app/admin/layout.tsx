@@ -10,7 +10,7 @@ export default function AdminLayout({
   return (
     <RoleGuard allowedRole="administrador">
       <div className="flex flex-col min-h-screen bg-surface">
-        <Header title="Coordinación" subtitle="Admin" profileLink="/admin/perfil" />
+        <Header title="Coordinación" subtitle="Admin" profileLink="/admin/perfil" homeLink="/admin/dashboard" />
         <main className="flex-1 overflow-y-auto pb-bottom-nav-safe pt-[72px]">
           <div className="w-full max-w-5xl mx-auto flex-1 flex flex-col">
             {children}

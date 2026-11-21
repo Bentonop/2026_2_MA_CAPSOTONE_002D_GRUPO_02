@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
+import { identidadDocente } from "@/lib/identidadDocente";
 import { supabase } from "@/lib/supabase";
 
 type ClassStatus = "scheduled" | "cancelled" | "substitution_requested";
@@ -30,7 +31,9 @@ export default function ProfesorDashboardPage() {
   const [cancelReason, setCancelReason] = useState("");
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState(() => new Date());
+  const monday = new Date(selectedDate);
+  monday.setDate(monday.getDate() - (monday.getDay() + 6) % 7);
 
   useEffect(() => {
     async function fetchProfile() {
@@ -41,13 +44,14 @@ export default function ProfesorDashboardPage() {
 
         const { data: user } = await supabase
           .from("profiles")
-          .select("*")
+          .select("name, last_name, correo")
           .eq("id", authUser.id)
           .maybeSingle();
         
-        if (user && user.name) {
-          setProfileName(user.name);
-          setProfileInitials(user.name.charAt(0) + (user.last_name ? user.last_name.charAt(0) : ""));
+        if (user) {
+          const identidad = identidadDocente({ ...user, correo: user.correo || authUser.email });
+          setProfileName(identidad.nombre);
+          setProfileInitials(identidad.iniciales);
         }
       } catch (err) {
         console.error("Error fetching profile", err);
@@ -227,14 +231,14 @@ export default function ProfesorDashboardPage() {
         </div>
         <div className="flex gap-2.5 overflow-x-auto px-gutter-mobile pb-2 snap-x snap-mandatory scrollbar-hide">
           {/* Week Days */}
-          {[-2, -1, 0, 1, 2, 3].map((offset, i) => {
-             const d = new Date();
+          {Array.from({ length: 7 }, (_, offset) => {
+             const d = new Date(monday);
              d.setDate(d.getDate() + offset);
              const isSelected = d.toDateString() === selectedDate.toDateString();
              
              return (
               <div 
-                key={i} 
+                key={d.toDateString()}
                 onClick={() => setSelectedDate(d)}
                 className={`flex flex-col items-center justify-center min-w-[56px] py-2.5 rounded-xl snap-start cursor-pointer transition-all ${isSelected ? 'bg-primary text-on-primary shadow-lg shadow-primary/25 scale-[1.02]' : 'bg-surface-container-lowest shadow-sm text-secondary hover:bg-surface-container-low'}`}
               >
@@ -253,7 +257,7 @@ export default function ProfesorDashboardPage() {
 
       <section className="px-gutter-mobile mt-space-lg flex flex-col gap-space-md">
         <div className="flex items-center justify-between">
-          <h3 className="font-headline-sm text-headline-sm text-on-surface">Horario de Hoy ({selectedDate.toLocaleDateString('es-ES', { month: 'short', day: 'numeric' })})</h3>
+          <h3 className="font-headline-sm text-headline-sm text-on-surface">Horario ({selectedDate.toLocaleDateString('es-ES', { month: 'short', day: 'numeric' })})</h3>
           <span className="font-label-md text-label-md text-secondary">{scheduledClassesCount} pendientes</span>
         </div>
 
@@ -320,7 +324,7 @@ export default function ProfesorDashboardPage() {
                     <div className="flex items-center gap-3">
                       <div className="flex -space-x-3">
                         {Array.from({length: Math.min(cls.enrolled, 3)}).map((_, i) => (
-                          <div key={i} className="w-8 h-8 rounded-full border-2 border-transparent bg-black/10 dark:bg-white/10 flex items-center justify-center text-xs">
+                          <div key={i}className="w-8 h-8 rounded-full border-2 border-transparent bg-black/10 dark:bg-white/10 flex items-center justify-center text-xs">
                             {String.fromCharCode(65 + i)}
                           </div>
                         ))}

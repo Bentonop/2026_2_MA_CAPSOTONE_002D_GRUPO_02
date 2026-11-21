@@ -1,9 +1,9 @@
 -- =======================================================
 -- SISTEMA DE INVITACIONES: WHITELIST TRIGGER (APP PRIVADA)
 -- =======================================================
--- Este script crea una función y un trigger en Supabase que se 
+-- Este script crea una función y un trigger en Supabase que se
 -- ejecuta automáticamente cada vez que alguien intenta crear una cuenta.
--- 
+--
 -- LÓGICA:
 -- 1. Verifica si el correo de quien se registra está en `roles_whitelist`.
 -- 2. Si no está, cancela el registro y lanza un error.
@@ -32,7 +32,7 @@ BEGIN
     NEW.id,
     COALESCE(
       NULLIF(TRIM(NEW.raw_user_meta_data->>'nombres'), ''),
-      split_part(NEW.email, '@', 1)
+      CASE WHEN v_role = 'profesor' THEN 'Docente sin nombre registrado' ELSE split_part(NEW.email, '@', 1) END
     ),
     COALESCE(NULLIF(TRIM(NEW.raw_user_meta_data->>'apellidos'), ''), ''),
     NEW.email,
@@ -49,7 +49,7 @@ BEGIN
 
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
 
 -- Crear el Trigger sobre la tabla auth.users (propia de Supabase)
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;

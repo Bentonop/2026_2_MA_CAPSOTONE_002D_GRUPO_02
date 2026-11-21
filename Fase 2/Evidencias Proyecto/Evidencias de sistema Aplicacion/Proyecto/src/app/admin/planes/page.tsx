@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
@@ -134,7 +134,7 @@ export default function AdminPlanesPage() {
 
       <div className="px-margin-mobile pt-space-md">
         <p className="font-body-sm text-on-surface-variant text-center max-w-2xl mx-auto mb-6">
-          Los planes configurados aquí aparecerán automáticamente en la pestaña "Tienda" de los alumnos. Controla precios, créditos y duración.
+          Activa o desactiva la venta de planes en la tienda. La vigencia vence por separado para cada alumno.
         </p>
 
         {isLoading ? (
@@ -152,7 +152,7 @@ export default function AdminPlanesPage() {
               <div key={plan.id_plan} className={`p-5 rounded-2xl border flex flex-col gap-3 shadow-sm ${plan.estado ? 'bg-surface-container-lowest border-primary/20' : 'bg-surface-container-low border-surface-container opacity-60'}`}>
                 <div className="flex items-start justify-between">
                   <h3 className="font-headline-sm text-on-surface leading-tight max-w-[80%]">{plan.nombre_plan}</h3>
-                  <button onClick={() => toggleStatus(plan.id_plan, plan.estado)} className={`w-12 h-6 rounded-full flex items-center transition-all px-1 ${plan.estado ? 'bg-emerald-500 justify-end' : 'bg-surface-container-highest justify-start'}`}>
+                  <button type="button" role="switch" aria-checked={plan.estado} aria-label={`Disponible en tienda: ${plan.nombre_plan}`} onClick={() => toggleStatus(plan.id_plan, plan.estado)} className={`w-12 h-6 rounded-full flex items-center transition-all px-1 ${plan.estado ? 'bg-emerald-500 justify-end' : 'bg-surface-container-highest justify-start'}`}>
                     <div className="w-4 h-4 rounded-full bg-white shadow-sm"></div>
                   </button>
                 </div>

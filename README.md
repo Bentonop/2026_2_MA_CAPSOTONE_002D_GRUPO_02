@@ -49,7 +49,8 @@ En las siguientes carpetas encontrarás los archivos `.sql` correspondientes:
 
 Estos archivos son el esqueleto de la base de datos. Si estás montando una base de datos desde cero, **debes ejecutar el contenido de estos archivos** en el *SQL Editor* de Supabase.
 
-Para una base existente, ejecuta `Proyecto/database_scripts/asistencia_qr.sql` para actualizar el esquema de asistencia y aplica las políticas de asistencia de `rls_politicas_seguridad.sql`. Aplica también `Proyecto/database_scripts/reservar_clase_atomica.sql` para habilitar las reservas concurrentes.
+Con una base existente, ejecuta el archivo consolidado `Proyecto/database_scripts/actualizacion_supabase.sql` desde el *SQL Editor* con el rol `postgres`. Incluye asistencia, reservas, registro por invitación, programación de clases, vigencia de planes, notificaciones privadas, borrado de cuentas y el trabajo de vencimiento de Supabase Cron. Conserva el historial y evita ejecutar los scripts de instalación o de datos demo sobre esa base. Si existen asistencias duplicadas para una misma reserva, la actualización se revierte para que los registros se revisen antes de volver a intentarlo.
+
 
 ### 4. Variables de Entorno
 Crea un archivo llamado `.env.local` dentro de la carpeta del proyecto (`Fase 2/Evidencias Proyecto/Evidencias de sistema Aplicacion/Proyecto/`) y añade las claves de Supabase:
@@ -63,6 +64,13 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=tu_clave_anon_de_supabase
 npm run dev
 ```
 La aplicación estará disponible en `http://localhost:3000`.
+
+## Datos personales y reportes de gestión
+
+- La baja elimina el perfil y los datos operativos asociados. Los comprobantes de pagos aprobados se separan en un esquema restringido para revisión contable. El plazo y la eliminación de esos respaldos deben definirse según la obligación aplicable.
+- El CSV operativo, disponible para administración, conserva nombres, plan, vencimiento, créditos, último pago y días desde el registro. Excluye RUT, correo, teléfono, contactos de emergencia y salud. El CSV financiero muestra totales mensuales sin datos de contacto. Los ingresos son cobros aprobados, excluyen la referencia de pago simulado y no equivalen a utilidad.
+- El indicador de permanencia se calcula en días desde el registro hasta el cierre de la cuenta. El promedio mensual se muestra desde cinco bajas para reducir exposición de grupos pequeños. El indicador no mide días con suscripción pagada.
+- Antes de declarar cumplimiento, valida la base de licitud, los accesos reales de Supabase y Storage, el manejo de datos de salud, el aviso de privacidad, los derechos de los titulares y los plazos de conservación de respaldos y copias exportadas. Los archivos ya descargados requieren gestión fuera de la aplicación.
 
 ## 🤝 Flujo de Trabajo del Equipo (Obligatorio)
 

@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
-import { exportAlumnosYPagosToExcel } from "@/lib/exportExcel";
+import { consultarReporteMensual, exportAlumnosYPagosToExcel } from "@/lib/exportExcel";
 
 interface UrgencyClass {
   id: string;
@@ -41,13 +41,13 @@ interface PagoReciente {
 }
 
 interface DashboardMetrics {
-  gananciasMes: number;
+  gananciasMes: number | null;
   gananciasPendientes: number;
   totalAlumnos: number;
   alumnosActivos: number;
   alumnosNuevosMes: number;
   pagosPendientesCount: number;
-  tasaAsistencia: number;
+  tasaAsistencia: number | null;
   planesPopulares: PlanPopular[];
   ultimosPagos: PagoReciente[];
 }
@@ -63,26 +63,15 @@ export default function AdminDashboardPage() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const [metrics, setMetrics] = useState<DashboardMetrics>({
-    gananciasMes: 1850000,
-    gananciasPendientes: 180000,
-    totalAlumnos: 48,
-    alumnosActivos: 39,
-    alumnosNuevosMes: 7,
-    pagosPendientesCount: 3,
-    tasaAsistencia: 92,
-    planesPopulares: [
-      { nombre: "Plan 8 Clases", alumnos: 19, porcentaje: 48, color: "bg-primary" },
-      { nombre: "Plan Ilimitado", alumnos: 11, porcentaje: 28, color: "bg-secondary" },
-      { nombre: "Plan 4 Clases", alumnos: 6, porcentaje: 15, color: "bg-emerald-500" },
-      { nombre: "Pase Diario", alumnos: 3, porcentaje: 9, color: "bg-amber-500" },
-    ],
-    ultimosPagos: [
-      { id: "1", alumnoNombre: "Valentina Henríquez", planNombre: "Plan 8 Clases", monto: 45000, metodo: "Transferencia", estado: "aprobado", fecha: "Hoy, 14:20" },
-      { id: "2", alumnoNombre: "Francisca Silva", planNombre: "Plan Ilimitado", monto: 65000, metodo: "Transferencia", estado: "pendiente", fecha: "Hoy, 11:05" },
-      { id: "3", alumnoNombre: "Camila Oyarzún", planNombre: "Plan 8 Clases", monto: 45000, metodo: "Débito", estado: "aprobado", fecha: "Ayer, 18:40" },
-      { id: "4", alumnoNombre: "Daniela Morales", planNombre: "Plan 4 Clases", monto: 28000, metodo: "Transferencia", estado: "pendiente", fecha: "16 Nov" },
-      { id: "5", alumnoNombre: "Sofía Castro", planNombre: "Plan 8 Clases", monto: 45000, metodo: "Transferencia", estado: "aprobado", fecha: "15 Nov" },
-    ]
+    gananciasMes: null,
+    gananciasPendientes: 0,
+    totalAlumnos: 0,
+    alumnosActivos: 0,
+    alumnosNuevosMes: 0,
+    pagosPendientesCount: 0,
+    tasaAsistencia: null,
+    planesPopulares: [],
+    ultimosPagos: [],
   });
 
   useEffect(() => {
@@ -189,7 +178,17 @@ export default function AdminDashboardPage() {
         .select("id, user_id, suscripcion_id, monto, metodo_pago, estado, fecha_pago, created_at")
         .order("fecha_pago", { ascending: false });
 
-      if (alumnosData && alumnosData.length > 0) {
+      const mesActual = new Intl.DateTimeFormat("sv-SE", {
+        timeZone: "America/Santiago", year: "numeric", month: "2-digit",
+      }).format(new Date());
+      const ingresosMes = await consultarReporteMensual(supabase)
+        .then(filas => Number(filas.find(fila => fila.mes?.startsWith(mesActual))?.ingresos ?? 0))
+        .catch(error => {
+          console.error("No se pudo obtener el total mensual:", error);
+          return null;
+        });
+
+      if (alumnosData) {
         const totalAlumnos = alumnosData.length;
         
         // Alumnos nuevos últimos 30 días
@@ -202,27 +201,16 @@ export default function AdminDashboardPage() {
         const uniqueActiveUsers = new Set(activeSubs.map(s => s.user_id)).size;
 
         // Finanzas
-        let totalAprobado = 0;
         let totalPendiente = 0;
         let countPendientes = 0;
 
         (pagosData || []).forEach(p => {
           const montoNum = Number(p.monto) || 0;
-          if (p.estado === "aprobado") {
-            totalAprobado += montoNum;
-          } else if (p.estado === "pendiente") {
+          if (p.estado === "pendiente") {
             totalPendiente += montoNum;
             countPendientes++;
           }
         });
-
-        // Si la tabla de pagos no tuviese montos registrados aún, sumar por planes activos
-        if (totalAprobado === 0 && activeSubs.length > 0) {
-          activeSubs.forEach(s => {
-            const precio = Number((s as any)?.planes?.precio) || 0;
-            totalAprobado += precio;
-          });
-        }
 
         // Distribución de Planes
         const planCounts: Record<string, number> = {};
@@ -255,7 +243,7 @@ export default function AdminDashboardPage() {
             id: p.id,
             alumnoNombre: alumnoName,
             planNombre: planName,
-            monto: Number(p.monto) || 45000,
+            monto: Number(p.monto) || 0,
             metodo: p.metodo_pago ? (p.metodo_pago.charAt(0).toUpperCase() + p.metodo_pago.slice(1)) : "Transferencia",
             estado: p.estado || "aprobado",
             fecha: dateStr,
@@ -263,15 +251,15 @@ export default function AdminDashboardPage() {
         });
 
         setMetrics({
-          gananciasMes: totalAprobado > 0 ? totalAprobado : 1850000,
-          gananciasPendientes: totalPendiente > 0 ? totalPendiente : 180000,
-          totalAlumnos: totalAlumnos > 0 ? totalAlumnos : 48,
-          alumnosActivos: uniqueActiveUsers > 0 ? uniqueActiveUsers : 39,
-          alumnosNuevosMes: alumnosNuevos > 0 ? alumnosNuevos : 7,
+          gananciasMes: ingresosMes,
+          gananciasPendientes: totalPendiente,
+          totalAlumnos,
+          alumnosActivos: uniqueActiveUsers,
+          alumnosNuevosMes: alumnosNuevos,
           pagosPendientesCount: countPendientes,
-          tasaAsistencia: 92,
-          planesPopulares: planesPopulares.length > 0 ? planesPopulares : metrics.planesPopulares,
-          ultimosPagos: ultimosPagos.length > 0 ? ultimosPagos : metrics.ultimosPagos,
+          tasaAsistencia: null,
+          planesPopulares,
+          ultimosPagos,
         });
       }
     } catch (err) {
@@ -434,7 +422,7 @@ export default function AdminDashboardPage() {
 
         {/* TARJETAS DE KPIS PRINCIPALES (GRID 4 COLUMNAS) */}
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* KPI 1: Ganancias del Mes */}
+          {/* KPI 1: Ingresos aprobados del mes */}
           <article className="p-5 rounded-2xl glass-panel border border-surface-container hover:border-emerald-500/30 transition-all flex flex-col justify-between shadow-sm relative overflow-hidden group">
             <div className="absolute top-0 right-0 p-4 opacity-15 group-hover:opacity-25 transition-opacity text-emerald-500">
               <span className="material-symbols-outlined text-[64px]">payments</span>
@@ -442,14 +430,14 @@ export default function AdminDashboardPage() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="font-label-sm uppercase tracking-wider text-xs font-bold text-on-surface-variant">
-                  Ganancias del Mes
+                  Ingresos aprobados del mes
                 </span>
                 <span className="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
                   <span className="material-symbols-outlined text-[18px]">attach_money</span>
                 </span>
               </div>
               <h2 className="text-2xl sm:text-3xl font-bold text-emerald-500 tracking-tight">
-                {formatCLP(metrics.gananciasMes)}
+                {metrics.gananciasMes === null ? "Sin datos" : formatCLP(metrics.gananciasMes)}
               </h2>
             </div>
             <div className="mt-3 pt-3 border-t border-surface-container flex items-center justify-between text-xs">
@@ -535,7 +523,7 @@ export default function AdminDashboardPage() {
                 </span>
               </div>
               <h2 className="text-2xl sm:text-3xl font-bold text-secondary tracking-tight">
-                {metrics.tasaAsistencia}%
+                {metrics.tasaAsistencia === null ? "Sin datos" : `${metrics.tasaAsistencia}%`}
               </h2>
             </div>
             <div className="mt-3 pt-3 border-t border-surface-container flex items-center justify-between text-xs">

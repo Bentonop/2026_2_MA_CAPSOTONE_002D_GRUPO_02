@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
@@ -54,32 +54,23 @@ export default function TiendaPage() {
     try {
       if (!supabase) throw new Error("Supabase no inicializado");
       
-      // Get current auth user
-      let userId: string | null = null;
-      try {
-        const { data: { user: authUser } } = await supabase.auth.getUser();
-        if (authUser?.id) userId = authUser.id;
-      } catch (e) {
-        console.error("Error getting auth user:", e);
-      }
-
-      if (!userId) {
-        const { data: user } = await supabase.from("profiles").select("id").eq("role", "alumno").order("created_at", { ascending: true }).limit(1).maybeSingle();
-        userId = user?.id || null;
-      }
-
-      if (!userId) throw new Error("No hay usuario autenticado.");
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("No hay usuario autenticado.");
+      const userId = user.id;
 
       const isManual = paymentMethod === "transferencia";
       const estadoSub = isManual ? "pendiente" : "activa";
       const estadoPago = isManual ? "pendiente" : "aprobado";
       const creditos = isManual ? 0 : selectedPlan.creditos_clases;
 
+      const inicio = new Date();
       // 1. Crear Suscripcion
       const { data: subData, error: subError } = await supabase.from("user_suscripciones").insert({
         user_id: userId,
         plan_id: selectedPlan.id_plan,
         estado: estadoSub,
+        fecha_inicio: isManual ? null : inicio.toISOString(),
+        fecha_fin: isManual ? null : new Date(inicio.getTime() + selectedPlan.duracion_dias * 86_400_000).toISOString(),
         creditos_restantes: creditos
       }).select("id").single();
 
