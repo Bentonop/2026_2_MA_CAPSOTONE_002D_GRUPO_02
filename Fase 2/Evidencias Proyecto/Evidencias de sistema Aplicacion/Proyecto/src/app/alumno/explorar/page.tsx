@@ -99,30 +99,33 @@ function ExplorarContent() {
   ];
 
   useEffect(() => {
-    // Generate next 15 days starting from today
+    // La semana se muestra de lunes a domingo; hoy queda seleccionado.
     const today = new Date();
+    const monday = new Date(today);
+    monday.setHours(0, 0, 0, 0);
+    monday.setDate(monday.getDate() - (monday.getDay() + 6) % 7);
+    const nextMonday = new Date(monday);
+    nextMonday.setDate(monday.getDate() + 7);
     const upcomingDays = [];
     const dayNames = ["DOM", "LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB"];
     const monthNames = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
     
-    for (let i = 0; i < 15; i++) {
-      const d = new Date(today);
-      d.setDate(today.getDate() + i);
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
       upcomingDays.push({
         day: d.getDate().toString(),
         label: dayNames[d.getDay()],
         fullDate: d,
-        dateStr: d.toISOString().split('T')[0],
+        dateStr: d.toDateString(),
         month: monthNames[d.getMonth()]
       });
     }
     
     setCurrentWeek(upcomingDays);
-    setActiveDay(today.getDate().toString());
+    setActiveDay(today.toDateString());
     setWeekHeader(`${monthNames[today.getMonth()]} ${today.getFullYear().toString().substring(2)}`);
-  }, []);
 
-  useEffect(() => {
     async function fetchAvailableClasses() {
       try {
         if (!supabase) throw new Error("Supabase client is null");
@@ -134,6 +137,8 @@ function ExplorarContent() {
             profiles:id_profesor (name)
           `)
           .eq("estado_clase", "programada")
+          .gte("fecha_hora_inicio", today.toISOString())
+          .lt("fecha_hora_inicio", nextMonday.toISOString())
           .order("fecha_hora_inicio", { ascending: true });
 
         if (error) throw error;
@@ -183,14 +188,7 @@ function ExplorarContent() {
       } catch (e) {
         console.error("Error getting auth user:", e);
       }
-      const { data: fallbackUser } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("role", "alumno")
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .maybeSingle();
-      return fallbackUser?.id || null;
+      return null;
     }
 
     async function fetchActiveSubscription() {
@@ -199,35 +197,19 @@ function ExplorarContent() {
         const userId = await getCurrentUserId();
         if (!userId) return;
 
-        let { data: sub } = await supabase
+        const { data: sub, error } = await supabase
           .from("user_suscripciones")
           .select("*, planes(nombre_plan)")
           .eq("user_id", userId)
           .eq("estado", "activa")
           .gt("creditos_restantes", 0)
+          .or(`fecha_fin.is.null,fecha_fin.gt.${new Date().toISOString()}`)
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
 
-        // Si el alumno no tiene suscripción activa, le creamos una con créditos
-        if (!sub) {
-          const { data: newSub } = await supabase
-            .from("user_suscripciones")
-            .insert({
-              user_id: userId,
-              plan_id: "33333333-0000-0000-0000-000000000003", // Plan Libre
-              estado: "activa",
-              creditos_restantes: 999,
-              fecha_inicio: new Date().toISOString(),
-              fecha_fin: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
-            })
-            .select("*, planes(nombre_plan)")
-            .maybeSingle();
-
-          if (newSub) sub = newSub;
-        }
-
-        if (sub) setActiveSubscription(sub);
+        if (error) throw error;
+        setActiveSubscription(sub);
       } catch (err) {
         console.error("Error fetching subscription", err);
       }
@@ -266,6 +248,10 @@ function ExplorarContent() {
   const handleReservar = (classId: string, currentEnrolled: number, maxCap: number) => {
     const cls = classes.find(c => c.id === classId);
     if (cls) {
+      if (Date.parse(cls.rawDate) <= Date.now()) {
+        toast.error("La hora de inicio de esta clase ya pasó.");
+        return;
+      }
       if (currentEnrolled >= maxCap) {
         showToast("Esta clase ya está llena");
         return;
@@ -287,55 +273,24 @@ function ExplorarContent() {
       const classIdNum = parseInt(selectedClassToBook.id);
       const { data: { session } } = await supabase.auth.getSession();
 
-      let newEnrolled = selectedClassToBook.enrolled + 1;
-      let newCredits = activeSubscription.creditos_restantes - 1;
-      let bookedAtomically = false;
-
-      if (session?.access_token) {
-        const res = await fetch("/api/reservas", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({ classId: classIdNum }),
-        });
-        const result = await res.json();
-
-        if (res.ok && result?.ok) {
-          bookedAtomically = true;
-          newEnrolled = result.cupos_inscritos ?? newEnrolled;
-          newCredits = result.creditos_restantes ?? newCredits;
-        } else if (res.status === 409 || res.status === 400) {
-          setIsReservationModalOpen(false);
-          showToast(result?.mensaje || "No se pudo completar la reserva");
-          return;
-        } else if (result?.codigo !== "DB_ERROR") {
-          throw new Error(result?.mensaje || "Error al confirmar la reserva");
-        }
+      if (!session?.access_token) throw new Error("Inicia sesión para reservar.");
+      const response = await fetch("/api/reservas", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ classId: classIdNum }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) {
+        if (result.codigo === "SIN_CREDITOS") setActiveSubscription(null);
+        toast.error(result.mensaje || "No se pudo completar la reserva");
+        return;
       }
 
-      if (!bookedAtomically) {
-        // Fallback legado si la RPC reservar_clase_atomica aún no se ejecutó en Supabase
-        const { error: reserveError } = await supabase.from("reserva").insert({
-          id_usuario: activeSubscription.user_id,
-          id_clase: classIdNum,
-          estado_reserva: 'confirmada',
-          fecha_operacion: new Date().toISOString()
-        });
-        if (reserveError) throw reserveError;
-
-        const { error: clError } = await supabase.from("clase").update({
-          cupos_inscritos: newEnrolled
-        }).eq("id_clase", classIdNum);
-        if (clError) throw clError;
-
-        const { error: updateError } = await supabase.from("user_suscripciones").update({
-          creditos_restantes: newCredits
-        }).eq("id", activeSubscription.id);
-        if (updateError) throw updateError;
-      }
-
+      const newEnrolled = result.cupos_inscritos ?? selectedClassToBook.enrolled + 1;
+      const newCredits = result.creditos_restantes ?? activeSubscription.creditos_restantes - 1;
       setActiveSubscription({ ...activeSubscription, creditos_restantes: newCredits });
       setMisReservas([...misReservas, selectedClassToBook.id]);
       setClasses(classes.map(c => c.id === selectedClassToBook.id ? { ...c, enrolled: newEnrolled } : c));
@@ -485,23 +440,24 @@ function ExplorarContent() {
 
       {/* Interactive Weekly Calendar Strip */}
       <section className="flex flex-col mt-space-md py-space-sm bg-surface">
-        <div className="flex items-center gap-2 pl-margin-mobile overflow-x-auto no-scrollbar pr-margin-mobile py-1 snap-x" id="calendar-days-rail">
+        <div className="flex flex-col gap-2 px-margin-mobile py-1" id="calendar-days-rail">
           
-          <div className="flex flex-col items-center justify-center pr-4 border-r border-surface-container snap-start flex-shrink-0">
-            <div className="w-10 h-10 rounded-xl bg-surface-container-high text-on-surface flex items-center justify-center mb-1">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-surface-container-high text-on-surface flex items-center justify-center">
               <span className="material-symbols-outlined">calendar_month</span>
             </div>
             <span className="font-label-sm text-[10px] text-on-surface font-bold uppercase tracking-widest">{weekHeader.substring(0, 3)} {weekHeader.slice(-2)}</span>
           </div>
 
-          <div className="flex items-center gap-3 pl-3 flex-nowrap">
+          <div className="grid grid-cols-7 gap-1 sm:gap-2">
             {currentWeek.map((d) => {
-              const isActive = activeDay === d.day;
+              const isActive = activeDay === d.dateStr;
               return (
                 <button 
                   key={d.dateStr}
-                  onClick={() => setActiveDay(d.day)}
-                  className={`cal-day snap-start flex-shrink-0 w-[52px] h-[52px] rounded-full flex flex-col items-center justify-center gap-0.5 transition-all active:scale-95 border-[1.5px] ${
+                  onClick={() => setActiveDay(d.dateStr)}
+                  aria-pressed={isActive}
+                  className={`cal-day min-w-0 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all active:scale-95 border-[1.5px] ${
                     isActive 
                       ? "border-primary bg-surface-container shadow-sm" 
                       : "border-surface-container bg-surface-container-lowest text-on-surface-variant hover:border-outline"
@@ -529,9 +485,9 @@ function ExplorarContent() {
       <div className="flex items-center justify-between px-margin-mobile mt-space-md mb-space-xs">
         <div className="flex items-baseline gap-2">
           <h2 className="font-headline-sm text-headline-sm text-on-surface font-bold uppercase">
-            {currentWeek.find(d => d.day === activeDay)?.label || ""}, {activeDay} de {currentWeek.find(d => d.day === activeDay)?.month || ""}
+            {currentWeek.find(d => d.dateStr === activeDay)?.label || ""}, {currentWeek.find(d => d.dateStr === activeDay)?.day || ""} de {currentWeek.find(d => d.dateStr === activeDay)?.month || ""}
           </h2>
-          <span className="font-label-caps text-label-caps text-on-surface-variant font-bold">{classes.filter(c => new Date(c.rawDate).getDate().toString() === activeDay).length} SESIONES</span>
+          <span className="font-label-caps text-label-caps text-on-surface-variant font-bold">{classes.filter(c => new Date(c.rawDate).toDateString() === activeDay).length} SESIONES</span>
         </div>
         <span className="font-label-md text-label-md text-primary font-semibold flex items-center">
           <span className="material-symbols-outlined text-[16px] mr-0.5">swap_vert</span>
@@ -546,17 +502,17 @@ function ExplorarContent() {
             <span className="material-symbols-outlined animate-spin text-primary text-[32px]">refresh</span>
           </div>
         ) : classes
-              .filter(c => new Date(c.rawDate).getDate().toString() === activeDay)
+              .filter(c => new Date(c.rawDate).toDateString() === activeDay)
               .filter(c => activeFilter === "all" || c.name === activeFilter)
               .filter(c => activeInstructor === "all" || c.instructor === activeInstructor)
               .filter(c => searchQuery === "" || c.name.toLowerCase().includes(searchQuery.toLowerCase()) || (c.instructor && c.instructor.toLowerCase().includes(searchQuery.toLowerCase())))
               .length === 0 ? (
           <div className="flex flex-col items-center text-center py-12 px-6">
-            <h4 className="font-headline-sm text-headline-sm text-primary font-bold mb-1">En Cuerpo y Alma no hay clases programadas hoy.</h4>
+            <h4 className="font-headline-sm text-headline-sm text-primary font-bold mb-1">No hay clases disponibles para esta fecha.</h4>
             <p className="font-body-md text-body-md text-on-surface-variant font-medium">Revisa el calendario o ajusta tu búsqueda.</p>
           </div>
         ) : classes
-              .filter(c => new Date(c.rawDate).getDate().toString() === activeDay)
+              .filter(c => new Date(c.rawDate).toDateString() === activeDay)
               .filter(c => activeFilter === "all" || c.name === activeFilter)
               .filter(c => activeInstructor === "all" || c.instructor === activeInstructor)
               .filter(c => searchQuery === "" || c.name.toLowerCase().includes(searchQuery.toLowerCase()) || (c.instructor && c.instructor.toLowerCase().includes(searchQuery.toLowerCase())))

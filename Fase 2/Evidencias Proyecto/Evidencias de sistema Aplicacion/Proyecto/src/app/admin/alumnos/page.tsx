@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { calcularVigenciaPlan } from "@/lib/vigenciaPlan";
 import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
 import { exportAlumnosYPagosToExcel, exportFinanzasToExcel } from "@/lib/exportExcel";
@@ -36,7 +37,8 @@ interface PlanHistorial {
   id: string;
   nombre: string;
   estado: string;
-  fechaInicio: string;
+  fechaInicio: string | null;
+  duracionDias: number | null;
   fechaFin: string | null;
   creditosRestantes: number;
   precio: number | null;
@@ -102,7 +104,7 @@ export default function AdminAlumnosPage() {
     try {
       if (activeTab === "pagos") {
         const count = await exportFinanzasToExcel(supabase);
-        toast.success(`Reporte de pagos descargado (${count} transacciones).`);
+        toast.success(`Reporte financiero descargado (${count} períodos).`);
       } else {
         const count = await exportAlumnosYPagosToExcel(supabase);
         toast.success(`Reporte de alumnos descargado (${count} alumnos).`);
@@ -181,7 +183,21 @@ export default function AdminAlumnosPage() {
     setInvitaciones((invites || []).filter(invite => !registeredEmails.has(invite.correo?.trim().toLowerCase())));
   }, []);
 
+  const [ahoraHistorial, setAhoraHistorial] = useState(0);
+
+  useEffect(() => {
+    if (!alumnoHistorial) return;
+    const actualizarHora = () => setAhoraHistorial(Date.now());
+    const intervalo = window.setInterval(actualizarHora, 30_000);
+    window.addEventListener("focus", actualizarHora);
+    return () => {
+      window.clearInterval(intervalo);
+      window.removeEventListener("focus", actualizarHora);
+    };
+  }, [alumnoHistorial]);
+
   const abrirHistorial = async (alumno: Profile) => {
+    setAhoraHistorial(Date.now());
     setAlumnoHistorial(alumno);
     setHistorialPlanes([]);
     setHistorialClases([]);
@@ -214,7 +230,7 @@ export default function AdminAlumnosPage() {
         id: string;
         plan_id: string;
         estado: string;
-        fecha_inicio: string;
+        fecha_inicio: string | null;
         fecha_fin: string | null;
         creditos_restantes: number;
       }[];
@@ -229,11 +245,11 @@ export default function AdminAlumnosPage() {
       })[];
 
       const planIds = Array.from(new Set(subscriptions.map(subscription => subscription.plan_id)));
-      let plans: { id_plan: string; nombre_plan: string; precio: number }[] = [];
+      let plans: { id_plan: string; nombre_plan: string; precio: number; duracion_dias: number }[] = [];
       if (planIds.length > 0) {
         const { data, error } = await supabase
           .from("planes")
-          .select("id_plan, nombre_plan, precio")
+          .select("id_plan, nombre_plan, precio, duracion_dias")
           .in("id_plan", planIds);
         if (error) throw error;
         plans = (data || []) as typeof plans;
@@ -248,6 +264,7 @@ export default function AdminAlumnosPage() {
           estado: subscription.estado,
           fechaInicio: subscription.fecha_inicio,
           fechaFin: subscription.fecha_fin,
+          duracionDias: plan?.duracion_dias ?? null,
           creditosRestantes: subscription.creditos_restantes,
           precio: payment?.monto ?? plan?.precio ?? null,
           pagoEstado: payment?.estado ?? null,
@@ -412,41 +429,42 @@ export default function AdminAlumnosPage() {
     }
   };
 
+  const [eliminandoAlumno, setEliminandoAlumno] = useState<string | null>(null);
+
   const handleDeleteAlumno = async (id: string, name: string) => {
-    if (!supabase) return;
-    if (!window.confirm(`¿Estás seguro de que deseas eliminar la cuenta del alumno ${name}? Esta acción no se puede deshacer.`)) return;
+    if (eliminandoAlumno !== null) return;
+    if (!window.confirm(`¿Eliminar definitivamente la cuenta de «${name}»? Se eliminarán su perfil, reservas, asistencias y planes. Los respaldos contables se conservan con acceso restringido. Esta acción es irreversible.`)) return;
+
+    setEliminandoAlumno(id);
     try {
-      const { error } = await supabase.from("profiles").update({ role: "eliminado" }).eq("id", id);
+      const { error } = await supabase.rpc("eliminar_cuenta_alumno", { p_alumno_id: id });
       if (error) throw error;
-      showToast("Cuenta eliminada con éxito.");
-      fetchAlumnos();
+      showToast("Cuenta eliminada de Supabase.");
+      void fetchAlumnos();
     } catch (error) {
       console.error("Error eliminando alumno", error);
-      toast.error("Error al eliminar la cuenta del alumno.");
+      const code = typeof error === "object" && error !== null && "code" in error ? error.code : null;
+      if (code === "PGRST202") {
+        toast.error("Falta aplicar eliminar_cuenta_alumno.sql en Supabase.");
+      } else if (code === "23503") {
+        toast.error("La cuenta tiene registros vinculados que impiden eliminarla.");
+      } else {
+        toast.error("No se pudo eliminar la cuenta del alumno.");
+      }
+    } finally {
+      setEliminandoAlumno(null);
     }
   };
 
   const procesarPago = async (pago: PagoPendiente, action: "aprobado" | "rechazado") => {
     if (!supabase) return;
     try {
-      // 1. Update pago status
-      const { error: pagoError } = await supabase.from("user_pagos").update({ estado: action }).eq("id", pago.id);
-      if (pagoError) throw pagoError;
-      
-      // 2. If approved, update suscripcion status and add credits
-      if (action === "aprobado") {
-         const { data: currentSus } = await supabase.from("user_suscripciones").select("creditos_restantes").eq("id", pago.suscripcion_id).single();
-         const currentCredits = currentSus?.creditos_restantes || 0;
-         const newCredits = pago.plan?.creditos_clases || 0;
+      const { error } = await supabase.rpc("resolver_pago_plan", {
+        p_pago_id: pago.id,
+        p_estado: action,
+      });
+      if (error) throw error;
 
-         const { error: susError } = await supabase.from("user_suscripciones").update({
-           estado: "activa",
-           creditos_restantes: currentCredits + newCredits
-         }).eq("id", pago.suscripcion_id);
-         if (susError) throw susError;
-      }
-      
-      // 3. Refresh
       toast.success(`Pago ${action} con éxito.`);
       fetchPagos();
     } catch (error) {
@@ -646,7 +664,9 @@ export default function AdminAlumnosPage() {
                         Plan
                       </button>
                       <button 
-                        onClick={() => handleDeleteAlumno(alumno.id, alumno.name)} 
+                        onClick={() => handleDeleteAlumno(alumno.id, alumno.name)}
+                        disabled={eliminandoAlumno !== null}
+                        aria-label={`Eliminar cuenta de ${alumno.name}`}
                         className="w-10 h-10 shrink-0 rounded-lg bg-error/10 text-error flex items-center justify-center transition-colors hover:bg-error/20" 
                         title="Eliminar Alumno"
                       >
@@ -799,24 +819,27 @@ export default function AdminAlumnosPage() {
                       <p className="p-4 rounded-xl bg-surface-container-low text-on-surface-variant font-body-sm">Este alumno todavía no tiene planes registrados.</p>
                     ) : (
                       <div className="flex flex-col gap-3">
-                        {historialPlanes.map(plan => (
+                        {historialPlanes.map(plan => {
+                          const vigencia = calcularVigenciaPlan(plan.estado, plan.fechaInicio, plan.fechaFin, plan.duracionDias, ahoraHistorial);
+                          return (
                           <article key={plan.id} className="p-4 rounded-2xl border border-surface-container bg-surface-container-lowest">
                             <div className="flex items-start justify-between gap-3">
                               <div>
                                 <h4 className="font-label-lg font-bold text-on-surface">{plan.nombre}</h4>
                                 <p className="font-body-sm text-on-surface-variant mt-1">Inicio: {formatHistoryDate(plan.fechaInicio)}</p>
-                                <p className="font-body-sm text-on-surface-variant">Vence: {formatHistoryDate(plan.fechaFin)}</p>
+                                <p className="font-body-sm text-on-surface-variant">{vigencia.estado === "vencida" ? "Venció" : "Vence"}: {formatHistoryDate(vigencia.fin)}</p>
                               </div>
-                              <span className="px-2.5 py-1 rounded-full bg-primary/10 text-primary font-label-sm font-bold capitalize">{plan.estado}</span>
+                              <span className={`px-2.5 py-1 rounded-full font-label-sm font-bold capitalize ${vigencia.estado === "vencida" ? "bg-error/10 text-error" : "bg-primary/10 text-primary"}`}>{vigencia.estado === "sin_vigencia" ? "Vigencia sin confirmar" : vigencia.estado}</span>
                             </div>
                             <div className="mt-3 pt-3 border-t border-surface-container flex flex-wrap gap-x-4 gap-y-1 font-body-sm text-on-surface-variant">
-                              <span>{plan.creditosRestantes} créditos restantes</span>
+                              <span>{vigencia.estado === "activa" ? `${plan.creditosRestantes} créditos disponibles` : "Sin créditos disponibles"}</span>
                               {plan.precio !== null && <span>${plan.precio.toLocaleString("es-CL")}</span>}
                               {plan.pagoEstado && <span>Pago: {plan.pagoEstado}</span>}
                               {plan.metodoPago && <span>Método: {plan.metodoPago}</span>}
                             </div>
                           </article>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </section>

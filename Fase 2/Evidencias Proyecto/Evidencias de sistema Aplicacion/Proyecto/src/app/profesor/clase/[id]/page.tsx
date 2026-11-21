@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useEffect, use } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { leerPaseAlumno } from "@/lib/paseAlumno";
 import QrScanner from "@/components/shared/QrScanner";
 import RoleGuard from "@/components/ui/auth/RoleGuard";
 import BrandLogo from "@/components/ui/BrandLogo";
@@ -33,11 +35,23 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
   const [claseDetalle, setClaseDetalle] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  const [marcandoReserva, setMarcandoReserva] = useState<number | null>(null);
+
   // Estados para el Escáner de Asistencia (Exclusivo Docente)
   const [isScannerModalOpen, setIsScannerModalOpen] = useState(false);
   const [isScannerLocked, setIsScannerLocked] = useState(false);
   const [isProcessingScan, setIsProcessingScan] = useState(false);
   const [scanFeedback, setScanFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  useEffect(() => {
+    if (!isScannerModalOpen || scanFeedback?.type !== "success") return;
+    const timer = window.setTimeout(() => {
+      setIsScannerModalOpen(false);
+      setScanFeedback(null);
+      setIsScannerLocked(false);
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [isScannerModalOpen, scanFeedback]);
 
   // Modales y Alertas
   const [isIncidentModalOpen, setIsIncidentModalOpen] = useState(false);
@@ -45,16 +59,33 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
 
   useEffect(() => {
+    let active = true;
+
     async function fetchClaseData() {
-      if (!supabase) return;
+      setIsLoading(true);
+      setClaseDetalle(null);
+      setStudents([]);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!active) return;
+      if (!user) {
+        setIsLoading(false);
+        return;
+      }
+
       
       const { data: claseData } = await supabase
         .from('clase')
         .select('*')
         .eq('id_clase', id)
-        .single();
+        .eq('id_profesor', user.id)
+        .maybeSingle();
         
-      if (claseData) setClaseDetalle(claseData);
+      if (!active) return;
+      if (!claseData) {
+        setIsLoading(false);
+        return;
+      }
+      setClaseDetalle(claseData);
 
       const { data: reservas } = await supabase
         .from('reserva')
@@ -104,12 +135,13 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
             healthConditions: profile?.condicion_medica || "Ninguna (Apto para actividad física)"
           };
         });
-        setStudents(mappedStudents);
+        if (active) setStudents(mappedStudents);
       }
-      setIsLoading(false);
+      if (active) setIsLoading(false);
     }
-    
+
     fetchClaseData();
+    return () => { active = false; };
   }, [id]);
 
   const presentCount = students.filter(s => s.status === "presente").length;
@@ -121,48 +153,24 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
     setTimeout(() => setToastMessage(null), 2800);
   };
 
-  // Función interna para registrar asistencia en las tablas asistencia y reserva
-  const registrarAsistenciaBD = async (reservaId: number, tokenUsado: string) => {
-    if (!supabase) return;
-
-    // 1. Guardar o actualizar registro en la tabla asistencia
-    const { error } = await supabase
-      .from("asistencia")
-      .upsert({
-        id_reserva: reservaId,
-        asistio: true,
-        fecha_hora_ingreso: new Date().toISOString(),
-        metodo_ingreso: "QR_DOCENTE",
-        token_qr_usado: tokenUsado
-      }, { onConflict: 'id_reserva' });
-    if (error) throw error;
-
-    // 2. Actualizar estado en reserva
-    await supabase
-      .from("reserva")
-      .update({ estado_reserva: "presente" })
-      .eq("id_reserva", reservaId);
-  };
-
-  const handleSimulateScan = async () => {
-    const pendingStudent = students.find(s => s.status === "pendiente");
-    if (pendingStudent) {
-      try {
-        await registrarAsistenciaBD(pendingStudent.reserva_id, `simulacion-${pendingStudent.reserva_id}`);
-      } catch {
-        toast.error("No se pudo guardar la asistencia.");
-        return;
+  const registrarAsistenciaBD = async (reservaId: number, tokenQr: string | null = null) => {
+    const { data, error } = await supabase.rpc("registrar_asistencia_docente", {
+      p_clase_id: Number(id),
+      p_reserva_id: reservaId,
+      p_token_qr: tokenQr,
+    });
+    if (error) {
+      if (error.code === "PGRST202") {
+        throw new Error("Falta aplicar el script asistencia_qr.sql en Supabase.");
       }
-      
-      const horaActual = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
-      const updatedStudent = { ...pendingStudent, status: "presente" as StudentStatus, time: horaActual };
-      setStudents(prev => prev.map(s => s.id === pendingStudent.id ? updatedStudent : s));
-      setSelectedStudent(updatedStudent);
-      toast.success(`✅ ¡Presente! Asistencia confirmada para ${pendingStudent.name}`);
-      showToast(`Ingresó: ${pendingStudent.name}`);
-    } else {
-      toast("No hay alumnos pendientes para escanear");
+      if (error.code === "42501" || error.code === "P0001") {
+        throw new Error(error.message);
+      }
+      console.error("Error al guardar asistencia:", error);
+      throw new Error("No se pudo guardar la asistencia.");
     }
+
+    return new Date(data).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" });
   };
 
   // MANEJO PRINCIPAL DE ESCANEO DE QR (ANTI-SATURACIÓN Y CIERRE AUTOMÁTICO)
@@ -172,36 +180,16 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
     setIsScannerLocked(true);
     setIsProcessingScan(true);
 
-    let targetReservaId: number | null = null;
-    let targetClaseId: number | null = null;
-    let targetUserId: string | null = null;
-
-    try {
-      const parsed = JSON.parse(decodedText);
-      targetReservaId = Number(parsed.id_reserva) || null;
-      targetClaseId = Number(parsed.id_clase) || null;
-      targetUserId = parsed.id_usuario || null;
-    } catch {
-      targetReservaId = Number(decodedText) || null;
-    }
-
-    // 2. Validación de Clase: el QR debe pertenecer a esta clase
-    if (targetClaseId && String(targetClaseId) !== String(id)) {
-      const errorMsg = `Este código QR pertenece a otra clase (#${targetClaseId}). No corresponde a ${claseDetalle?.nombre_clase || "esta sesión"}.`;
-      toast.error(errorMsg);
-      setScanFeedback({ type: "error", message: errorMsg });
+    const pase = leerPaseAlumno(decodedText);
+    if (pase && pase.id_clase !== Number(id)) {
+      const message = "Este pase QR corresponde a otra clase.";
+      toast.error(message);
+      setScanFeedback({ type: "error", message });
       setIsProcessingScan(false);
       return;
     }
 
-    // 3. Buscar el alumno en la lista de inscritos
-    const student = students.find(s => 
-      (targetReservaId && s.reserva_id === targetReservaId) || 
-      (targetUserId && s.id === targetUserId) ||
-      s.id.toString() === decodedText || 
-      s.reserva_id.toString() === decodedText || 
-      s.name.toLowerCase() === decodedText.toLowerCase()
-    );
+    const student = pase ? students.find(s => s.reserva_id === pase.id_reserva) : undefined;
 
     if (!student) {
       const errorMsg = "Código QR no válido o el alumno no se encuentra inscrito en esta clase.";
@@ -218,12 +206,6 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
       setScanFeedback({ type: "success", message: `${student.name} ya está presente` });
       setIsProcessingScan(false);
       
-      // Cerrar escáner tras breve confirmación
-      setTimeout(() => {
-        setIsScannerModalOpen(false);
-        setScanFeedback(null);
-        setIsScannerLocked(false);
-      }, 1000);
       return;
     }
 
@@ -238,9 +220,7 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
 
     // 6. CASO DE ÉXITO: Registrar en base de datos y cerrar escáner automáticamente
     try {
-      await registrarAsistenciaBD(student.reserva_id, decodedText);
-
-      const horaActual = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+      const horaActual = await registrarAsistenciaBD(student.reserva_id, decodedText);
       const updatedStudent = { ...student, status: "presente" as StudentStatus, time: horaActual };
       
       setStudents(prev => prev.map(s => s.id === student.id ? updatedStudent : s));
@@ -257,42 +237,32 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
         message: `¡Asistencia confirmada para ${student.name}!`
       });
 
-      // Cerrar el escáner automáticamente tal como pidió el usuario
-      setTimeout(() => {
-        setIsScannerModalOpen(false);
-        setScanFeedback(null);
-        setIsScannerLocked(false);
-        setIsProcessingScan(false);
-      }, 900);
+      setIsProcessingScan(false);
     } catch (err) {
       console.error("Error al registrar asistencia:", err);
-      toast.error("Error al conectar con la base de datos.");
-      setScanFeedback({ type: "error", message: "Error al guardar asistencia." });
+      const message = err instanceof Error ? err.message : "Error al guardar asistencia.";
+      toast.error(message);
+      setScanFeedback({ type: "error", message });
       setIsProcessingScan(false);
     }
   };
 
-  const handleCheckIn = async (studentId: string | number, e: React.MouseEvent) => {
+  const handleCheckIn = async (student: Student, e: React.MouseEvent) => {
     e.stopPropagation();
-    
-    const student = students.find(s => s.id === studentId);
-    if (!student || !supabase) return;
+    if (student.status !== "pendiente" || marcandoReserva !== null) return;
 
+    setMarcandoReserva(student.reserva_id);
     try {
-      await registrarAsistenciaBD(student.reserva_id, `manual-${student.reserva_id}`);
-    } catch {
-      toast.error("No se pudo guardar la asistencia.");
-      return;
+      const time = await registrarAsistenciaBD(student.reserva_id);
+      const updatedStudent: Student = { ...student, status: "presente", time };
+      setStudents(prev => prev.map(s => s.reserva_id === student.reserva_id ? updatedStudent : s));
+      setSelectedStudent(updatedStudent);
+      toast.success(`Asistencia registrada para ${student.name}.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo guardar la asistencia.");
+    } finally {
+      setMarcandoReserva(null);
     }
-
-    const horaActual = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
-    const updatedStudent = { ...student, status: "presente" as StudentStatus, time: horaActual };
-    setStudents(prev => 
-      prev.map(s => s.id === studentId ? updatedStudent : s)
-    );
-    setSelectedStudent(updatedStudent);
-    toast.success(`✅ ¡Presente! ${student.name} marcado manualmente.`);
-    showToast(`Ingresó: ${student.name}`);
   };
 
   const submitIncident = (type: string) => {
@@ -335,6 +305,22 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
     }
   };
 
+  const loadingClass = isLoading || (claseDetalle && claseDetalle.id_clase !== Number(id));
+  if (loadingClass || !claseDetalle) {
+    return (
+      <RoleGuard allowedRole="profesor">
+        <main className="p-6 text-center">
+          {loadingClass ? <p role="status">Cargando clase…</p> : (
+            <>
+              <p role="alert">Esta clase no está disponible en tu agenda.</p>
+              <Link href="/profesor/dashboard" className="underline">Volver a mi agenda</Link>
+            </>
+          )}
+        </main>
+      </RoleGuard>
+    );
+  }
+
   return (
     <RoleGuard allowedRole="profesor">
     <div className="bg-surface font-body-md text-body-md text-on-surface flex flex-col min-h-screen">
@@ -352,7 +338,7 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
             <h1 className="font-headline-sm text-headline-sm text-on-surface tracking-tight truncate max-w-[200px] ml-2">Detalle De Clase</h1>
           </div>
           <div className="flex items-center gap-space-xs">
-             <div className="w-8 h-8 rounded-full bg-surface-container-high shadow-sm flex items-center justify-center text-primary font-bold text-xs">DOC</div>
+             <Link href="/profesor/perfil" aria-label="Ir a mi perfil" className="w-11 h-11 rounded-full bg-surface-container-high flex items-center justify-center text-primary font-bold text-xs">DOC</Link>
           </div>
         </div>
       </header>
@@ -455,14 +441,8 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
                 <div className="flex items-center justify-between px-1 pt-1 text-xs text-secondary">
                   <span className="flex items-center gap-1">
                     <span className="material-symbols-outlined text-[15px] text-emerald-500">lock_clock</span>
-                    Cierre automático al registrar
+                    El escáner se cierra cuando se confirma la asistencia.
                   </span>
-                  <button 
-                    onClick={handleSimulateScan}
-                    className="text-primary hover:underline font-semibold"
-                  >
-                    Simular Pase (Test)
-                  </button>
                 </div>
               </div>
             </div>
@@ -531,10 +511,11 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
                       {student.status === "pendiente" && (
                         <button 
                           className="px-3 py-1.5 rounded-xl bg-primary text-on-primary font-label-md text-label-md flex items-center gap-1 transition-all active:scale-95 shadow-md shadow-primary/20"
-                          onClick={(e) => handleCheckIn(student.id, e)}
+                          onClick={(e) => handleCheckIn(student, e)}
+                          disabled={marcandoReserva !== null || claseDetalle.estado_clase === "cancelada"}
                         >
                           <span className="material-symbols-outlined text-[16px]">touch_app</span>
-                          <span>Marcar</span>
+                          <span>{marcandoReserva === student.reserva_id ? "Guardando…" : "Marcar presente"}</span>
                         </button>
                       )}
                     </div>
@@ -625,6 +606,7 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
                   setIsScannerLocked(false);
                 }}
                 aria-label="Cerrar escáner"
+                disabled={isProcessingScan}
                 className="w-9 h-9 rounded-full bg-surface-container hover:bg-surface-container-high flex items-center justify-center text-on-surface-variant transition-colors"
               >
                 <span className="material-symbols-outlined text-[20px]">close</span>
@@ -646,7 +628,7 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
                 <div className="w-14 h-14 rounded-full bg-error/15 text-error border border-error/30 flex items-center justify-center">
                   <span className="material-symbols-outlined text-[32px]">warning</span>
                 </div>
-                <h4 className="font-headline-sm text-lg font-bold text-error">Atención: Código No Válido</h4>
+                <h4 className="font-headline-sm text-lg font-bold text-error">No se pudo confirmar la asistencia</h4>
                 <div className="p-3 rounded-xl bg-error/10 border border-error/20 text-xs text-on-surface text-center">
                   {scanFeedback.message}
                 </div>
