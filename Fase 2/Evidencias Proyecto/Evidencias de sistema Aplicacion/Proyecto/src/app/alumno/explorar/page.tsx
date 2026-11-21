@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import toast from "react-hot-toast";
 
 interface ClassSession {
   id: string;
@@ -340,10 +341,10 @@ function ExplorarContent() {
       setClasses(classes.map(c => c.id === selectedClassToBook.id ? { ...c, enrolled: newEnrolled } : c));
 
       setIsReservationModalOpen(false);
-      showToast("Reserva confirmada con éxito");
+      toast.success("¡Reserva confirmada con éxito!");
     } catch (err) {
       console.error("Error booking", err);
-      alert("Error al confirmar la reserva");
+      toast.error("Error al confirmar la reserva. Intenta nuevamente.");
     } finally {
       setIsBooking(false);
     }
@@ -367,6 +368,16 @@ function ExplorarContent() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
+          {searchQuery && (
+            <button
+              type="button"
+              aria-label="Limpiar búsqueda"
+              onClick={() => setSearchQuery("")}
+              className="mr-1 w-8 h-8 flex items-center justify-center rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors"
+            >
+              <span className="material-symbols-outlined text-[18px]">close</span>
+            </button>
+          )}
           <button 
             aria-label="Filtros avanzados" 
             onClick={() => setIsFilterModalOpen(!isFilterModalOpen)}
