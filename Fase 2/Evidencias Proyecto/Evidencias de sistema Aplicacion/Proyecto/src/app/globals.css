@@ -17,9 +17,46 @@
   --avatar-foreground: #B58920;
 
   --glass-background: rgb(255 255 255 / 88%);
-  --glass-border: rgb(30 32 29 / 8%);
+  --glass-border: rgb(30 32 29 / 10%);
   --shadow-soft: 0 12px 40px rgb(30 32 29 / 7%);
   --shadow-premium: 0 20px 60px rgb(30 32 29 / 12%);
+
+  /* Escala de contenedores para Modo Claro */
+  --surface-container-lowest: #FFFFFF;
+  --surface-container-low: #FAF9F6;
+  --surface-container: #F0EEE6;
+  --surface-container-high: #E6E4DC;
+  --surface-container-highest: #DCDAD0;
+}
+
+.dark,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --background: #11120F;
+  --foreground: #F4F3EE;
+
+  --primary: #E5B834;
+  --primary-hover: #F0C952;
+  --principal: #F4F3EE;
+  --surface: #1A1C18;
+  --text-secondary: #A3A29B;
+  --success: #5CA674;
+  --alert: #D96A63;
+  --avatar-background: #362D15;
+  --avatar-foreground: #E5B834;
+
+  --glass-background: rgb(26 28 24 / 88%);
+  --glass-border: rgb(255 255 255 / 12%);
+  --shadow-soft: 0 12px 40px rgb(0 0 0 / 40%);
+  --shadow-premium: 0 20px 60px rgb(0 0 0 / 60%);
+
+  /* Escala de contenedores para Modo Oscuro */
+  --surface-container-lowest: #141512;
+  --surface-container-low: #1A1C18;
+  --surface-container: #222520;
+  --surface-container-high: #2B2F28;
+  --surface-container-highest: #373C33;
 }
 
 @theme inline {
@@ -29,21 +66,21 @@
   --font-mono: var(--font-geist-mono);
 
   --color-primary: var(--primary);
-  --color-on-primary: var(--principal);
+  --color-on-primary: #1E201D;
   --color-primary-hover: var(--primary-hover);
 
-  --color-secondary: var(--principal);
-  --color-on-secondary: #FFFFFF;
+  --color-secondary: var(--primary);
+  --color-on-secondary: #1E201D;
 
   --color-surface: var(--surface);
   --color-on-surface: var(--foreground);
-  --color-surface-variant: var(--background);
+  --color-surface-variant: var(--surface-container);
   --color-on-surface-variant: var(--text-secondary);
-  --color-surface-container-lowest: var(--surface);
-  --color-surface-container-low: var(--surface);
-  --color-surface-container: var(--background);
-  --color-surface-container-high: var(--background);
-  --color-surface-container-highest: var(--background);
+  --color-surface-container-lowest: var(--surface-container-lowest);
+  --color-surface-container-low: var(--surface-container-low);
+  --color-surface-container: var(--surface-container);
+  --color-surface-container-high: var(--surface-container-high);
+  --color-surface-container-highest: var(--surface-container-highest);
 
   --spacing-space-2xs: 0.25rem;
   --spacing-space-xs: 0.5rem;
@@ -124,7 +161,9 @@
     min-height: 100%;
     scroll-behavior: smooth;
     background: var(--background);
+    color: var(--foreground);
     -webkit-text-size-adjust: 100%;
+    transition: background-color 200ms ease, color 200ms ease;
   }
 
   body {
@@ -140,6 +179,7 @@
     background: var(--background);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    transition: background-color 200ms ease, color 200ms ease;
   }
 
   button,
@@ -164,8 +204,8 @@
   }
 
   :focus-visible {
-    outline: 3px solid rgb(30 32 29 / 55%);
-    outline-offset: 3px;
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
   }
 
   .pb-safe {
@@ -204,7 +244,7 @@
     border: 0;
     border-radius: 9999px;
     padding: 0.75rem 1.375rem;
-    color: var(--principal);
+    color: #1E201D;
     font-weight: 700;
     letter-spacing: -0.01em;
     background: var(--primary);
@@ -233,19 +273,19 @@
   }
 
   .card-normal {
-    border: 1px solid rgb(30 32 29 / 7%);
+    border: 1px solid var(--glass-border);
     border-radius: 1.5rem;
-    color: #242424;
-    background: #FFFFFF;
-    box-shadow: 0 12px 36px rgb(30 32 29 / 6%);
+    color: var(--foreground);
+    background: var(--surface);
+    box-shadow: var(--shadow-soft);
   }
 
   .card-featured {
-    border: 1px solid rgb(255 255 255 / 8%);
+    border: 1px solid var(--glass-border);
     border-radius: 1.5rem;
     color: #FFFFFF;
     background: #1E201D;
-    box-shadow: 0 20px 50px rgb(30 32 29 / 22%);
+    box-shadow: 0 20px 50px rgb(0 0 0 / 25%);
   }
 
   .avatar-soft {
@@ -253,32 +293,32 @@
     align-items: center;
     justify-content: center;
     border-radius: 9999px;
-    color: #B58920;
-    background: #F3E6BE;
+    color: var(--avatar-foreground);
+    background: var(--avatar-background);
   }
 
   .text-secondary {
-    color: #777777;
+    color: var(--text-secondary);
   }
 
   .text-main {
-    color: #242424;
+    color: var(--foreground);
   }
 
   .badge-available {
-    color: #4E8B63;
+    color: var(--success);
   }
 
   .badge-full {
-    color: #C95C55;
+    color: var(--alert);
   }
 
   .bottom-nav-active {
-    color: #D4A72C;
+    color: var(--primary);
   }
 
   .bottom-nav-inactive {
-    color: #777777;
+    color: var(--text-secondary);
   }
 
   .glass-panel {
@@ -286,8 +326,8 @@
     border-radius: 1.5rem;
     background: var(--glass-background);
     box-shadow:
-      0 8px 32px rgb(30 32 29 / 6%),
-      inset 0 1px 0 rgb(255 255 255 / 70%);
+      var(--shadow-soft),
+      inset 0 1px 0 rgb(255 255 255 / 15%);
     -webkit-backdrop-filter: blur(20px) saturate(120%);
     backdrop-filter: blur(20px) saturate(120%);
   }
@@ -295,14 +335,15 @@
   .premium-card {
     position: relative;
     overflow: hidden;
-    border: 1px solid rgb(30 32 29 / 7%);
+    border: 1px solid var(--glass-border);
     border-radius: 1.5rem;
     color: var(--foreground);
-    background: #FFFFFF;
+    background: var(--surface);
     box-shadow: var(--shadow-soft);
     transition:
       transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
-      box-shadow 240ms ease;
+      box-shadow 240ms ease,
+      border-color 200ms ease;
   }
 
   .premium-card:hover {
@@ -311,24 +352,30 @@
   }
 
   .gradient-text {
-    color: var(--principal);
+    color: var(--foreground);
   }
 
   .card-dark {
-    border: 1px solid rgb(255 255 255 / 8%);
+    border: 1px solid var(--glass-border);
     border-radius: 1.5rem;
-    color: #FFFFFF;
-    background: #1E201D;
-    box-shadow: 0 20px 50px rgb(30 32 29 / 22%);
+    color: var(--foreground);
+    background: var(--surface);
+    box-shadow: var(--shadow-premium);
   }
 
   .card-light {
-    border: 1px solid rgb(30 32 29 / 7%);
+    border: 1px solid var(--glass-border);
     border-radius: 1.5rem;
-    color: #242424;
-    background: #FFFFFF;
+    color: var(--foreground);
+    background: var(--surface);
     box-shadow: var(--shadow-soft);
   }
+}
+
+.dark input,
+.dark select,
+.dark textarea {
+  color-scheme: dark;
 }
 
 @media (prefers-reduced-motion: reduce) {
