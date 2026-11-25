@@ -10,7 +10,7 @@ export default function TiendaPage() {
   
   // Payment Modal State
   const [selectedPlan, setSelectedPlan] = useState<any | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<"transferencia" | "integrado" | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<"transferencia" | "integrado">("integrado");
   const [comprobanteUrl, setComprobanteUrl] = useState("");
   const [fileName, setFileName] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -45,6 +45,7 @@ export default function TiendaPage() {
 
   const procesarCompra = async () => {
     if (!selectedPlan || !paymentMethod) return;
+
     if (paymentMethod === "transferencia" && !comprobanteUrl.trim()) {
       toast.error("Por favor adjunta o ingresa el comprobante de transferencia.");
       return;
@@ -55,22 +56,69 @@ export default function TiendaPage() {
       if (!supabase) throw new Error("Supabase no inicializado");
       
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("No hay usuario autenticado.");
+      if (!user) throw new Error("No hay usuario autenticado. Por favor inicia sesión.");
       const userId = user.id;
 
-      const isManual = paymentMethod === "transferencia";
-      const estadoSub = isManual ? "pendiente" : "activa";
-      const estadoPago = isManual ? "pendiente" : "aprobado";
-      const creditos = isManual ? 0 : selectedPlan.creditos_clases;
+      // ==========================================
+      // FLUJO 1: PAGO EN LÍNEA CON WEBPAY PLUS
+      // ==========================================
+      if (paymentMethod === "integrado") {
+        toast.loading("Iniciando conexión con Transbank Webpay Plus...", { id: "webpay-init" });
 
-      const inicio = new Date();
+        const res = await fetch("/api/webpay/crear", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            planId: selectedPlan.id_plan,
+            userId: userId,
+          }),
+        });
+
+        const result = await res.json();
+        toast.dismiss("webpay-init");
+
+        if (!res.ok || !result.ok) {
+          throw new Error(result.mensaje || "No se pudo iniciar el pago en Webpay");
+        }
+
+        // Redirigir a Webpay
+        if (result.url.startsWith("/") || result.url.includes("simulador-webpay")) {
+          window.location.href = result.url;
+        } else {
+          // Envío estándar oficial de formulario POST a Transbank Webpay
+          const form = document.createElement("form");
+          form.method = "POST";
+          form.action = result.url;
+
+          const tokenInput = document.createElement("input");
+          tokenInput.type = "hidden";
+          tokenInput.name = "token_ws";
+          tokenInput.value = result.token;
+
+          form.appendChild(tokenInput);
+          document.body.appendChild(form);
+          form.submit();
+        }
+        return;
+      }
+
+      // ==========================================
+      // FLUJO 2: TRANSFERENCIA MANUAL
+      // ==========================================
+      const isManual = true;
+      const estadoSub = "pendiente";
+      const estadoPago = "pendiente";
+      const creditos = 0;
+
       // 1. Crear Suscripcion
       const { data: subData, error: subError } = await supabase.from("user_suscripciones").insert({
         user_id: userId,
         plan_id: selectedPlan.id_plan,
         estado: estadoSub,
-        fecha_inicio: isManual ? null : inicio.toISOString(),
-        fecha_fin: isManual ? null : new Date(inicio.getTime() + selectedPlan.duracion_dias * 86_400_000).toISOString(),
+        fecha_inicio: null,
+        fecha_fin: null,
         creditos_restantes: creditos
       }).select("id").single();
 
@@ -81,35 +129,20 @@ export default function TiendaPage() {
         suscripcion_id: subData.id,
         user_id: userId,
         monto: selectedPlan.precio,
-        metodo_pago: paymentMethod,
+        metodo_pago: "transferencia",
         estado: estadoPago,
-        comprobante_url: isManual ? comprobanteUrl : "TRANSACCION_WEBPAY_12345"
+        comprobante_url: comprobanteUrl
       });
 
       if (pagoError) throw pagoError;
 
-      // 3. Incrementar ventas del plan
-      const currentVentas = selectedPlan.ventas || 0;
-      await supabase
-        .from("planes")
-        .update({ ventas: currentVentas + 1 })
-        .eq("id_plan", selectedPlan.id_plan);
-        
-      fetchPlanes(); // Refresh planes to update UI
-
       setSelectedPlan(null);
-      setPaymentMethod(null);
       setComprobanteUrl("");
+      showToast("¡Comprobante enviado! El administrador lo revisará pronto.");
       
-      if (isManual) {
-        showToast("¡Comprobante enviado! El administrador lo revisará pronto.");
-      } else {
-        showToast("¡Pago exitoso! Tus créditos han sido agregados.");
-      }
-      
-    } catch (error) {
-      console.error("Error al comprar", error);
-      toast.error("Error al procesar la compra. Intenta nuevamente.");
+    } catch (error: any) {
+      console.error("Error al procesar compra:", error);
+      toast.error(error?.message || "Error al procesar la compra. Intenta nuevamente.");
     } finally {
       setIsProcessing(false);
     }
@@ -208,58 +241,131 @@ export default function TiendaPage() {
       {/* PAYMENT MODAL */}
       {selectedPlan && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-surface/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-surface-container-lowest w-full sm:w-[400px] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col animate-in slide-in-from-bottom-10 max-h-[90vh] overflow-y-auto border border-surface-container">
+          <div className="bg-surface-container-lowest w-full sm:w-[440px] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col animate-in slide-in-from-bottom-10 max-h-[90vh] overflow-y-auto border border-surface-container">
             
             <div className="flex justify-between items-center p-4 border-b border-surface-container sticky top-0 bg-surface-container-lowest z-10">
-              <h3 className="font-headline-sm text-on-surface font-bold">Método de Pago</h3>
-              <button onClick={() => { setSelectedPlan(null); setPaymentMethod(null); }} className="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center text-on-surface-variant">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary">payments</span>
+                <h3 className="font-headline-sm text-on-surface font-bold">Método de Pago</h3>
+              </div>
+              <button 
+                onClick={() => { setSelectedPlan(null); }} 
+                className="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high transition-colors"
+              >
                 <span className="material-symbols-outlined">close</span>
               </button>
             </div>
 
             <div className="p-5 pb-24 flex flex-col gap-5">
-              <div className="bg-surface-container-low p-4 rounded-xl flex justify-between items-center">
-                <span className="font-body-md text-on-surface-variant">Total a pagar:</span>
-                <span className="font-headline-sm font-bold gradient-text">${selectedPlan.precio.toLocaleString()}</span>
+              
+              {/* Resumen del plan */}
+              <div className="bg-surface-container-low p-4 rounded-2xl border border-surface-container flex flex-col gap-1">
+                <div className="flex justify-between items-center">
+                  <span className="font-label-md font-bold text-on-surface">{selectedPlan.nombre_plan}</span>
+                  <span className="font-headline-sm font-black gradient-text">${selectedPlan.precio.toLocaleString()} CLP</span>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-on-surface-variant font-medium mt-1">
+                  <span>📅 {selectedPlan.duracion_dias} días de vigencia</span>
+                  <span>•</span>
+                  <span>🎟️ {selectedPlan.creditos_clases} clases incluidas</span>
+                </div>
               </div>
 
+              {/* Selector de Métodos de Pago */}
               <div className="flex flex-col gap-3">
+                
+                {/* Opción 1: Webpay Plus */}
                 <button 
+                  type="button"
                   onClick={() => setPaymentMethod("integrado")}
-                  className={`p-4 rounded-xl border-2 flex items-center gap-3 transition-colors ${paymentMethod === 'integrado' ? 'border-primary bg-primary/5' : 'border-surface-container bg-surface-container-lowest'}`}
+                  className={`p-4 rounded-2xl border-2 flex items-start gap-3.5 transition-all text-left ${
+                    paymentMethod === 'integrado' 
+                      ? 'border-primary bg-primary/5 shadow-sm' 
+                      : 'border-surface-container bg-surface-container-lowest hover:border-surface-container-highest'
+                  }`}
                 >
-                  <span className={`material-symbols-outlined text-[28px] ${paymentMethod === 'integrado' ? 'text-primary' : 'text-on-surface-variant'}`}>credit_card</span>
-                  <div className="flex flex-col text-left">
-                    <span className="font-label-lg text-on-surface font-bold">Pago en línea (Webpay)</span>
-                    <span className="font-body-sm text-on-surface-variant">Aprobación instantánea</span>
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                    paymentMethod === 'integrado' ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'
+                  }`}>
+                    <span className="material-symbols-outlined text-[24px]">credit_card</span>
+                  </div>
+
+                  <div className="flex flex-col flex-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-label-lg text-on-surface font-bold">Pago en línea (Webpay Plus)</span>
+                      <span className="text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold px-2 py-0.5 rounded-full border border-emerald-500/20">
+                        Inmediato
+                      </span>
+                    </div>
+                    <span className="font-body-sm text-on-surface-variant text-xs mt-0.5">
+                      Débito (Redcompra), Crédito y Prepago. Transbank oficial.
+                    </span>
+
+                    {/* Insignias de tarjetas aceptadas */}
+                    <div className="flex items-center gap-1.5 mt-2.5">
+                      <span className="px-2 py-0.5 bg-red-600 text-white text-[10px] font-black rounded tracking-tight">
+                        Webpay Plus
+                      </span>
+                      <span className="px-1.5 py-0.5 bg-surface-container text-on-surface-variant text-[10px] font-semibold rounded">
+                        Redcompra
+                      </span>
+                      <span className="px-1.5 py-0.5 bg-surface-container text-on-surface-variant text-[10px] font-semibold rounded">
+                        Visa
+                      </span>
+                      <span className="px-1.5 py-0.5 bg-surface-container text-on-surface-variant text-[10px] font-semibold rounded">
+                        Mastercard
+                      </span>
+                    </div>
                   </div>
                 </button>
 
+                {/* Opción 2: Transferencia Bancaria */}
                 <button 
+                  type="button"
                   onClick={() => setPaymentMethod("transferencia")}
-                  className={`p-4 rounded-xl border-2 flex items-center gap-3 transition-colors ${paymentMethod === 'transferencia' ? 'border-primary bg-primary/5' : 'border-surface-container bg-surface-container-lowest'}`}
+                  className={`p-4 rounded-2xl border-2 flex items-start gap-3.5 transition-all text-left ${
+                    paymentMethod === 'transferencia' 
+                      ? 'border-primary bg-primary/5 shadow-sm' 
+                      : 'border-surface-container bg-surface-container-lowest hover:border-surface-container-highest'
+                  }`}
                 >
-                  <span className={`material-symbols-outlined text-[28px] ${paymentMethod === 'transferencia' ? 'text-primary' : 'text-on-surface-variant'}`}>account_balance</span>
-                  <div className="flex flex-col text-left">
-                    <span className="font-label-lg text-on-surface font-bold">Transferencia Manual</span>
-                    <span className="font-body-sm text-on-surface-variant">Requiere validación admin</span>
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                    paymentMethod === 'transferencia' ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'
+                  }`}>
+                    <span className="material-symbols-outlined text-[24px]">account_balance</span>
+                  </div>
+
+                  <div className="flex flex-col flex-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-label-lg text-on-surface font-bold">Transferencia Manual</span>
+                      <span className="text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 font-bold px-2 py-0.5 rounded-full border border-amber-500/20">
+                        Manual
+                      </span>
+                    </div>
+                    <span className="font-body-sm text-on-surface-variant text-xs mt-0.5">
+                      Requiere validación de comprobante por administración
+                    </span>
                   </div>
                 </button>
               </div>
 
               {/* Transferencia Details */}
               {paymentMethod === "transferencia" && (
-                <div className="bg-surface-container p-4 rounded-xl flex flex-col gap-3 animate-in fade-in slide-in-from-top-2">
-                  <h4 className="font-label-md font-bold text-on-surface border-b border-surface-container-highest pb-2">Datos Bancarios</h4>
-                  <ul className="font-body-sm text-on-surface-variant flex flex-col gap-1.5">
-                    <li><span className="font-bold">Banco:</span> Banco Estado</li>
-                    <li><span className="font-bold">Cuenta Rut:</span> 12.345.678-9</li>
-                    <li><span className="font-bold">Nombre:</span> Cuerpo y Alma</li>
-                    <li><span className="font-bold">Correo:</span> pagos@cuerpoyalma.cl</li>
+                <div className="bg-surface-container p-4 rounded-2xl flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 border border-surface-container-highest">
+                  <h4 className="font-label-md font-bold text-on-surface border-b border-surface-container-highest pb-2">
+                    Datos Bancarios para Transferencia
+                  </h4>
+                  <ul className="font-body-sm text-on-surface-variant flex flex-col gap-1.5 text-xs">
+                    <li><span className="font-bold text-on-surface">Banco:</span> Banco Estado</li>
+                    <li><span className="font-bold text-on-surface">Cuenta Corriente / Rut:</span> 12.345.678-9</li>
+                    <li><span className="font-bold text-on-surface">Titular:</span> Gimnasio Cuerpo y Alma SpA</li>
+                    <li><span className="font-bold text-on-surface">Correo:</span> pagos@cuerpoyalma.cl</li>
                   </ul>
                   
                   <div className="flex flex-col gap-1.5 mt-2">
-                    <label className="font-label-sm font-bold text-on-surface">Comprobante de Transferencia:</label>
+                    <label className="font-label-sm font-bold text-on-surface text-xs">
+                      Adjuntar Comprobante de Transferencia:
+                    </label>
                     <div className="relative">
                       <input 
                         type="file"
@@ -277,10 +383,10 @@ export default function TiendaPage() {
                         }}
                         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                       />
-                      <div className="h-12 px-3 rounded-lg border-2 border-dashed border-primary bg-primary/5 text-primary flex items-center justify-center gap-2 hover:bg-primary/10 transition-colors">
+                      <div className="h-12 px-3 rounded-xl border-2 border-dashed border-primary bg-primary/5 text-primary flex items-center justify-center gap-2 hover:bg-primary/10 transition-colors">
                         <span className="material-symbols-outlined text-[20px]">{fileName ? 'check_circle' : 'add_photo_alternate'}</span>
                         <span className="font-label-md font-bold truncate max-w-[200px]">
-                           {fileName ? fileName : "Seleccionar foto"}
+                           {fileName ? fileName : "Seleccionar foto o PDF"}
                         </span>
                       </div>
                     </div>
@@ -288,17 +394,35 @@ export default function TiendaPage() {
                 </div>
               )}
 
+              {/* Mensaje de seguridad para Webpay */}
+              {paymentMethod === "integrado" && (
+                <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-xs font-medium">
+                  <span className="material-symbols-outlined text-[20px] shrink-0" style={{ fontVariationSettings: '"FILL" 1' }}>
+                    verified_user
+                  </span>
+                  <span>Transacción encriptada y protegida por Transbank Webpay Plus.</span>
+                </div>
+              )}
+
+              {/* Botón de Pago */}
               <button 
                 onClick={procesarCompra}
                 disabled={!paymentMethod || isProcessing}
-                className="w-full h-14 mt-2 bg-primary text-on-primary rounded-xl font-label-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50 transition-opacity"
+                className="w-full h-14 bg-primary text-on-primary rounded-xl font-label-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50 transition-all hover:opacity-95 active:scale-[0.99] shadow-md"
               >
                 {isProcessing ? (
-                  <span className="material-symbols-outlined animate-spin text-[24px]">refresh</span>
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined animate-spin text-[24px]">refresh</span>
+                    <span>Conectando con Webpay...</span>
+                  </div>
                 ) : (
                   <>
-                    {paymentMethod === 'transferencia' ? 'Enviar Comprobante' : 'Confirmar Pago'}
-                    <span className="material-symbols-outlined">{paymentMethod === 'transferencia' ? 'send' : 'lock'}</span>
+                    <span>
+                      {paymentMethod === 'transferencia' ? 'Enviar Comprobante' : `Pagar con Webpay Plus ($${selectedPlan.precio.toLocaleString()})`}
+                    </span>
+                    <span className="material-symbols-outlined">
+                      {paymentMethod === 'transferencia' ? 'send' : 'lock'}
+                    </span>
                   </>
                 )}
               </button>
