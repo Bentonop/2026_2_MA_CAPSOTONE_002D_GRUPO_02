@@ -82,7 +82,26 @@ async function handleWebpayReturn(req: NextRequest) {
 
   // 2. CASO NORMAL: CONFIRMAR CON TRANSBANK
   try {
+    const url = new URL(req.url);
+    const customCardRaw = url.searchParams.get("card_num") || "";
+    const customCardDigits = customCardRaw.replace(/\D/g, "").slice(-4);
+    const customCardType = url.searchParams.get("card_type") || "";
+    const simStatus = url.searchParams.get("sim_status") || "";
+
     const commitResult = await commitWebpayTransaction(tokenWs);
+
+    // Si el usuario simuló un rechazo bancario expresamente
+    if (simStatus === "rejected") {
+      commitResult.response_code = -1;
+      commitResult.status = "FAILED";
+    }
+
+    if (customCardDigits) {
+      commitResult.card_detail = { card_number: customCardDigits };
+    }
+    if (customCardType) {
+      commitResult.payment_type_code = customCardType;
+    }
 
     const isApproved =
       commitResult.response_code === 0 && commitResult.status === "AUTHORIZED";

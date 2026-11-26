@@ -75,16 +75,22 @@ export default function MisClasesPage() {
     const classStartTime = new Date(reserva.clase.fecha_hora_inicio);
     const hoursDifference = (classStartTime.getTime() - Date.now()) / (1000 * 60 * 60);
 
-    const isEarlyCancel = hoursDifference >= 2;
-    const confirmMessage = isEarlyCancel
-      ? `¿Deseas cancelar tu reserva para "${reserva.clase.nombre_clase}"?\n\nAl cancelar con más de 2 horas de anticipación, tu crédito será reembolsado automáticamente a tu saldo mensual.`
-      : `¿Deseas cancelar tu reserva para "${reserva.clase.nombre_clase}"?\n\nAtención: Faltan menos de 2 horas para el inicio de la clase, por lo que el crédito no será reembolsado.`;
+    // Regla estricta: Solo permitir cancelar con al menos 2 horas de anticipación
+    if (hoursDifference < 2) {
+      toast.error("No es posible cancelar: las cancelaciones deben realizarse con al menos 2 horas de anticipación al inicio de la clase.");
+      return;
+    }
+
+    const confirmMessage = `¿Deseas cancelar tu reserva para "${reserva.clase.nombre_clase}"?\n\nAl cancelar con más de 2 horas de anticipación, tu crédito será reembolsado automáticamente a tu cuenta.`;
 
     if (!window.confirm(confirmMessage)) return;
 
     setCancellingId(reserva.id_reserva);
     try {
       if (!supabase) throw new Error("No hay cliente Supabase inicializado");
+
+      const { data: { user } } = await supabase.auth.getUser();
+      const studentId = reserva.id_usuario || user?.id;
 
       // 1. Marcar reserva como cancelada
       const { error: cancelError } = await supabase
@@ -101,40 +107,41 @@ export default function MisClasesPage() {
         .update({ cupos_inscritos: Math.max(0, currentEnrolled - 1) })
         .eq("id_clase", reserva.clase.id_clase);
 
+      // 3. Reembolsar 1 crédito a la suscripción activa del alumno
       let reembolsado = false;
-      // 3. Reembolsar crédito si fue con >= 2 horas y hay vigencia
-      if (isEarlyCancel) {
+      if (studentId) {
         const { data: sub } = await supabase
           .from("user_suscripciones")
           .select("id, creditos_restantes")
-          .eq("user_id", reserva.id_usuario)
+          .eq("user_id", studentId)
           .eq("estado", "activa")
-          .gt("fecha_fin", new Date().toISOString())
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
 
         if (sub) {
-          const { data: subsActualizada } = await supabase
+          const { error: subUpdateError } = await supabase
             .from("user_suscripciones")
-            .update({ creditos_restantes: (sub.creditos_restantes || 0) + 1 })
-            .eq("id", sub.id)
-            .eq("estado", "activa")
-            .gt("fecha_fin", new Date().toISOString())
-            .select("estado")
-            .maybeSingle();
-          reembolsado = subsActualizada?.estado === "activa";
-          if (reembolsado) setCredits(prev => prev + 1);
+            .update({ 
+              creditos_restantes: (sub.creditos_restantes || 0) + 1,
+              updated_at: new Date().toISOString()
+            })
+            .eq("id", sub.id);
+
+          if (!subUpdateError) {
+            reembolsado = true;
+            setCredits(prev => prev + 1);
+          }
         }
       }
 
-      // 4. Actualizar estado local
+      // 4. Actualizar lista local de reservas
       setReservas(prev => prev.filter(r => r.id_reserva !== reserva.id_reserva));
 
       toast.success(
         reembolsado
-          ? "Clase cancelada. Tu crédito ha sido reembolsado exitosamente."
-          : "Clase cancelada. Cupo liberado para la academia."
+          ? "Clase cancelada exitosamente. Se ha reembolsado 1 crédito a tu cuenta."
+          : "Clase cancelada exitosamente. Tu cupo ha sido liberado."
       );
     } catch (err: any) {
       console.error("Error al cancelar reserva:", err);
@@ -219,7 +226,7 @@ export default function MisClasesPage() {
           <div className="flex flex-col">
             <span className="font-label-md text-label-md text-on-surface font-bold">Cancelación Consciente <span className="text-primary">•</span></span>
             <p className="font-body-sm text-[13px] text-on-surface-variant leading-relaxed mt-1">
-              Recuerda: Si liberas tu cupo con al menos <strong className="text-on-surface">2 hrs de anticipación</strong>, tu crédito vuelve automáticamente a tu saldo mensual sin llamadas ni esperas.
+              Recuerda: Las cancelaciones se permiten hasta con un mínimo de <strong className="text-on-surface">2 horas de anticipación</strong>. Al cancelar a tiempo, tu crédito se reembolsa automáticamente a tu cuenta.
             </p>
           </div>
         </section>
@@ -300,55 +307,55 @@ export default function MisClasesPage() {
 
                 {/* Actions */}
                 {(isToday || activeTab === 'futuras') && (
-                  <div className="flex gap-2 p-space-md pt-0">
-                    {isToday ? (
-                      isPresente ? (
-                        <div className="flex-1 h-14 bg-emerald-500/10 border border-emerald-500/20 rounded-xl font-label-lg font-bold flex items-center justify-center gap-2 text-emerald-500">
-                          <span className="material-symbols-outlined text-[20px]">check_circle</span>
-                          Asistencia Confirmada
-                        </div>
-                      ) : (
-                        <button 
-                          onClick={() => setSelectedReserva(cls)}
-                          className="flex-1 h-14 bg-primary text-on-primary rounded-xl font-label-lg font-bold flex items-center justify-center gap-2 hover:opacity-90 active:scale-95 transition-all shadow-md shadow-primary/20"
-                        >
-                          <span className="material-symbols-outlined text-[20px]">qr_code_2</span>
-                          Mi Pase QR
-                        </button>
-                      )
-                    ) : (
-                      <div className="flex-1 flex gap-2">
-                        <button 
-                          onClick={() => setSelectedReserva(cls)}
-                          className="flex-1 h-14 bg-surface-container-high text-primary border border-primary/20 rounded-xl font-label-lg font-bold flex items-center justify-center gap-1.5 hover:bg-surface-container-highest transition-all"
-                        >
-                          <span className="material-symbols-outlined text-[18px]">qr_code_2</span>
-                          Ver Pase
-                        </button>
-                        <Link
-                          href="/alumno/explorar"
-                          className="flex-1 h-14 bg-surface-container-high text-on-surface rounded-xl font-label-lg font-medium flex items-center justify-center gap-2 hover:bg-surface-container-highest transition-all"
-                        >
-                          <span className="material-symbols-outlined text-[18px]">edit_calendar</span>
-                          Reagendar
-                        </Link>
+                  <div className="flex gap-2.5 p-space-md pt-0">
+                    {isPresente ? (
+                      <div className="flex-1 h-14 bg-emerald-500/10 border border-emerald-500/20 rounded-xl font-label-lg font-bold flex items-center justify-center gap-2 text-emerald-500">
+                        <span className="material-symbols-outlined text-[20px]">check_circle</span>
+                        Asistencia Confirmada
                       </div>
-                    )}
+                    ) : (() => {
+                      const classStartTime = new Date(cls.clase.fecha_hora_inicio);
+                      const hoursDifference = (classStartTime.getTime() - Date.now()) / (1000 * 60 * 60);
+                      const canCancel = hoursDifference >= 2;
 
-                    {!isPresente && (
-                      <button 
-                        onClick={() => handleCancelarReserva(cls)}
-                        disabled={cancellingId === cls.id_reserva}
-                        className={`${isToday ? 'w-[100px]' : 'w-[100px]'} h-14 bg-surface-container-high text-on-surface rounded-xl font-label-lg font-medium flex items-center justify-center gap-2 hover:bg-surface-container-highest transition-all disabled:opacity-50`}
-                      >
-                        {cancellingId === cls.id_reserva ? (
-                          <span className="material-symbols-outlined animate-spin text-[18px]">refresh</span>
-                        ) : (
-                          <span className="material-symbols-outlined text-[18px]">close</span>
-                        )}
-                        Cancelar
-                      </button>
-                    )}
+                      return (
+                        <>
+                          <button 
+                            onClick={() => setSelectedReserva(cls)}
+                            className="flex-1 h-14 bg-primary text-on-primary rounded-xl font-label-lg font-bold flex items-center justify-center gap-2 hover:opacity-90 active:scale-95 transition-all shadow-md shadow-primary/20"
+                          >
+                            <span className="material-symbols-outlined text-[20px]">qr_code_2</span>
+                            {isToday ? "Mi Pase QR" : "Ver Pase QR"}
+                          </button>
+
+                          <button 
+                            onClick={() => {
+                              if (!canCancel) {
+                                toast.error("No es posible cancelar: faltan menos de 2 horas para el inicio de la clase.");
+                                return;
+                              }
+                              handleCancelarReserva(cls);
+                            }}
+                            disabled={cancellingId === cls.id_reserva || !canCancel}
+                            title={!canCancel ? "Solo se puede cancelar hasta 2 horas antes de la clase" : "Cancelar reserva y recuperar crédito"}
+                            className={`h-14 px-4 rounded-xl font-label-lg font-bold flex items-center justify-center gap-1.5 transition-all ${
+                              canCancel 
+                                ? "bg-surface-container-high hover:bg-rose-500/10 text-rose-500 dark:text-rose-400 border border-rose-500/20 hover:border-rose-500/40 active:scale-95" 
+                                : "bg-surface-container text-on-surface-variant/40 border border-surface-container cursor-not-allowed"
+                            }`}
+                          >
+                            {cancellingId === cls.id_reserva ? (
+                              <span className="material-symbols-outlined animate-spin text-[18px]">refresh</span>
+                            ) : (
+                              <span className="material-symbols-outlined text-[18px]">
+                                {canCancel ? "close" : "lock_clock"}
+                              </span>
+                            )}
+                            <span>{canCancel ? "Cancelar" : "Bloqueado (<2h)"}</span>
+                          </button>
+                        </>
+                      );
+                    })()}
                   </div>
                 )}
               </article>

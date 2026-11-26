@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { calcularVigenciaPlan } from "@/lib/vigenciaPlan";
 import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
-import { exportAlumnosYPagosToExcel, exportFinanzasToExcel } from "@/lib/exportExcel";
+import { exportAlumnosYPagosToExcel, exportFinanzasToExcel, exportHistorialPagosToExcel } from "@/lib/exportExcel";
 
 interface Profile {
   id: string;
@@ -103,11 +103,11 @@ export default function AdminAlumnosPage() {
     setIsExporting(true);
     try {
       if (activeTab === "pagos") {
-        const count = await exportFinanzasToExcel(supabase);
-        toast.success(`Reporte financiero descargado (${count} períodos).`);
+        const count = await exportHistorialPagosToExcel(supabase);
+        toast.success(`Historial de pagos y transacciones descargado (${count} registros).`);
       } else {
         const count = await exportAlumnosYPagosToExcel(supabase);
-        toast.success(`Reporte de alumnos descargado (${count} alumnos).`);
+        toast.success(`Reporte detallado de alumnos descargado (${count} alumnos).`);
       }
     } catch (err: unknown) {
       console.error("Error al exportar Excel:", err);

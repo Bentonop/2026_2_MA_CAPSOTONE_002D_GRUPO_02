@@ -41,7 +41,7 @@ export interface WebpayCommitResponse {
 
 // Credenciales oficiales de Transbank para ambiente de Integración (Pruebas)
 const DEFAULT_COMMERCE_CODE = "597055555532";
-const DEFAULT_API_KEY = "579B532A7440BBAB77A8E6390F65C13D";
+const DEFAULT_API_KEY = "579B532A7440BB0C9079DED94D31EA1615BACEB56610332264630D42D0A36B1C";
 
 export function getWebpayConfig() {
   const isProd = process.env.WEBPAY_ENVIRONMENT === "production";

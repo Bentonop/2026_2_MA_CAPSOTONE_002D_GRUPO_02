@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
-import { consultarReporteMensual, exportAlumnosYPagosToExcel, exportFinanzasToExcel } from "@/lib/exportExcel";
+import { consultarReporteMensual, exportAlumnosYPagosToExcel, exportFinanzasToExcel, exportHistorialPagosToExcel } from "@/lib/exportExcel";
 
 interface UrgencyClass {
   id: string;
@@ -359,6 +359,20 @@ export default function AdminDashboardPage() {
     } catch (err) {
       console.error(err);
       toast.error("Error al exportar reporte financiero.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleDescargarPagos = async () => {
+    if (!supabase) return;
+    try {
+      setIsExporting(true);
+      const count = await exportHistorialPagosToExcel(supabase);
+      toast.success(`Historial de pagos y transacciones descargado (${count} registros).`);
+    } catch (err) {
+      console.error(err);
+      toast.error("Error al exportar historial de pagos.");
     } finally {
       setIsExporting(false);
     }
@@ -747,7 +761,7 @@ export default function AdminDashboardPage() {
               <span className="text-xs text-on-surface-variant">
                 Descarga los reportes en Excel (.csv UTF-8):
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
                 <button
                   onClick={handleDescargarFinanzas}
                   disabled={isExporting}
@@ -757,12 +771,20 @@ export default function AdminDashboardPage() {
                   Finanzas
                 </button>
                 <button
+                  onClick={handleDescargarPagos}
+                  disabled={isExporting}
+                  className="text-xs font-bold text-sky-600 hover:text-sky-500 flex items-center gap-1"
+                >
+                  <span className="material-symbols-outlined text-[16px]">receipt_long</span>
+                  Pagos & Webpay
+                </button>
+                <button
                   onClick={handleDescargarExcel}
                   disabled={isExporting}
                   className="text-xs font-bold text-emerald-600 hover:text-emerald-500 flex items-center gap-1"
                 >
                   <span className="material-symbols-outlined text-[16px]">file_download</span>
-                  Alumnos & Pagos
+                  Alumnos & Planes
                 </button>
               </div>
             </div>
