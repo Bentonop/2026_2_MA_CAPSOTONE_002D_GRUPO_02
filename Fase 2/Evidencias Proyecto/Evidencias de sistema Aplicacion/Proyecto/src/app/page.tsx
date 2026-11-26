@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import AuthForm from "@/components/ui/auth/AuthForm";
+import ThemeToggle from "@/components/theme/ThemeToggle";
 import { supabase } from "@/lib/supabase";
 
 interface ActiveSessionInfo {
@@ -56,6 +57,11 @@ export default function LoginPage() {
 
   return (
     <div className="flex flex-col min-h-screen bg-surface p-margin-mobile relative overflow-hidden">
+      {/* Botón flotante de Modo Oscuro en Login */}
+      <div className="absolute top-4 right-4 z-20">
+        <ThemeToggle />
+      </div>
+
       {/* Ambient gold glow for premium aesthetic */}
       <div className="absolute -top-40 -left-40 w-96 h-96 bg-primary/10 rounded-full blur-3xl pointer-events-none"></div>
       <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-primary/5 rounded-full blur-3xl pointer-events-none"></div>

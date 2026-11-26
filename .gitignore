@@ -12,6 +12,9 @@ out/
 next-env.d.ts
 *.tsbuildinfo
 
+# vercel
+.vercel/
+
 # temporary office files
 ~$*
 

@@ -8,6 +8,7 @@ import { leerPaseAlumno } from "@/lib/paseAlumno";
 import QrScanner from "@/components/shared/QrScanner";
 import RoleGuard from "@/components/ui/auth/RoleGuard";
 import BrandLogo from "@/components/ui/BrandLogo";
+import ThemeToggle from "@/components/theme/ThemeToggle";
 import toast from "react-hot-toast";
 
 type StudentStatus = "presente" | "pendiente" | "cancelado";
@@ -338,7 +339,8 @@ export default function ProfesorClasePage({ params }: { params: Promise<{ id: st
             <h1 className="font-headline-sm text-headline-sm text-on-surface tracking-tight truncate max-w-[200px] ml-2">Detalle De Clase</h1>
           </div>
           <div className="flex items-center gap-space-xs">
-             <Link href="/profesor/perfil" aria-label="Ir a mi perfil" className="w-11 h-11 rounded-full bg-surface-container-high flex items-center justify-center text-primary font-bold text-xs">DOC</Link>
+            <ThemeToggle />
+            <Link href="/profesor/perfil" aria-label="Ir a mi perfil" className="w-11 h-11 rounded-full bg-surface-container-high flex items-center justify-center text-primary font-bold text-xs">DOC</Link>
           </div>
         </div>
       </header>

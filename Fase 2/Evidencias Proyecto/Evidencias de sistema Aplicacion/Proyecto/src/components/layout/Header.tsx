@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
 import BrandLogo from "@/components/ui/BrandLogo";
+import ThemeToggle from "@/components/theme/ThemeToggle";
 
 interface HeaderProps {
   title?: string;
@@ -198,6 +199,7 @@ export default function Header({ title = "Cuerpo y Alma", subtitle = "Inicio", p
           ) : <div className="flex items-center gap-space-sm">{brand}</div>}
 
           <div className="flex items-center gap-space-xs relative">
+            <ThemeToggle />
             <button
               aria-label={unreadCount > 0 ? `Notificaciones (${unreadCount} sin leer)` : "Notificaciones"}
               onClick={() => setIsOpen(!isOpen)}

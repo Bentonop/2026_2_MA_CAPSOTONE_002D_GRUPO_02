@@ -620,7 +620,7 @@ function ExplorarContent() {
           <div className="flex flex-col">
             <span className="font-label-lg text-label-lg text-on-surface font-bold">Política de Asistencia Flexible</span>
             <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
-              Las reservas pueden cancelarse hasta <strong className="text-on-surface">4 horas antes</strong> del inicio de la sesión.
+              Las reservas pueden cancelarse hasta con <strong className="text-on-surface">2 horas de anticipación</strong>, recuperando tu crédito automáticamente.
             </p>
           </div>
         </div>
